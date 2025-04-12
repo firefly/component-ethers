@@ -1,6 +1,6 @@
 #include <string.h>
 
-#include "firefly-bip39.h"
+#include "firefly-bip32.h"
 #include "firefly-crypto.h"
 #include "firefly-hash.h"
 
