@@ -83,8 +83,8 @@ void ffx_hmac_initSha256(FfxHmacSha256Context *context,
 void ffx_hmac_updateSha256(FfxHmacSha256Context *context,
   const uint8_t *data, size_t length);
 void ffx_hmac_finalSha256(FfxHmacSha256Context *context, uint8_t *hmac);
-void ffx_hmac_sha256(uint8_t *digest, uint8_t *key, size_t keyLen,
-  uint8_t *data, size_t dataLen);
+void ffx_hmac_sha256(uint8_t *digest, const uint8_t *key, size_t keyLen,
+  const uint8_t *data, size_t dataLen);
 
 void ffx_hash_initSha512(FfxSha512Context *context);
 void ffx_hash_updateSha512(FfxSha512Context *context, const uint8_t *data,
@@ -97,8 +97,8 @@ void ffx_hmac_initSha512(FfxHmacSha512Context *context,
 void ffx_hmac_updateSha512(FfxHmacSha512Context *context,
   const uint8_t *data, size_t length);
 void ffx_hmac_finalSha512(FfxHmacSha512Context *context, uint8_t *hmac);
-void ffx_hmac_sha512(uint8_t *digest, uint8_t *key, size_t keyLen,
-  uint8_t *data, size_t dataLen);
+void ffx_hmac_sha512(uint8_t *digest, const uint8_t *key, size_t keyLen,
+  const uint8_t *data, size_t dataLen);
 
 
 #ifdef __cplusplus

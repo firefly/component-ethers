@@ -159,8 +159,8 @@ void ffx_hmac_finalSha256(FfxHmacSha256Context *context, uint8_t *hmac) {
     hmac_sha256_final(context, hmac, SHA256_DIGEST_SIZE);
 }
 
-void ffx_hmac_sha256(uint8_t *digest, uint8_t *key, size_t keyLen,
-  uint8_t *data, size_t dataLen) {
+void ffx_hmac_sha256(uint8_t *digest, const uint8_t *key, size_t keyLen,
+  const uint8_t *data, size_t dataLen) {
     hmac_sha256(key, keyLen, data, dataLen, digest, SHA256_DIGEST_SIZE);
 }
 
@@ -271,8 +271,8 @@ void ffx_hmac_finalSha512(FfxHmacSha512Context *context, uint8_t *hmac) {
     hmac_sha512_final(context, hmac, SHA512_DIGEST_SIZE);
 }
 
-void ffx_hmac_sha512(uint8_t *digest, uint8_t *key, size_t keyLen,
-  uint8_t *data, size_t dataLen) {
+void ffx_hmac_sha512(uint8_t *digest, const uint8_t *key, size_t keyLen,
+  const uint8_t *data, size_t dataLen) {
 
     hmac_sha512(key, keyLen, data, dataLen, digest, SHA512_DIGEST_SIZE);
 }
