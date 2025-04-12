@@ -6,6 +6,7 @@ extern "C" {
 #endif  /* __cplusplus */
 
 #include <stddef.h>
+#include <stdint.h>
 
 
 #define FFX_KECCAK256_DIGEST_LENGTH          (32)
@@ -32,25 +33,33 @@ typedef struct FfxKeccak256Context {
 } FfxKeccak256Context;
 
 typedef struct FfxSha256Context {
-    uint32_t state[8];
-    uint32_t bitCount;
-    uint32_t buffer[_ffx_sha256_block_length / sizeof(uint32_t)];
+    int32_t tot_len;
+    uint32_t len;
+    uint8_t block[2 * _ffx_sha256_block_length];
+    uint32_t h[8];
 } FfxSha256Context;
 
 typedef struct FfxSha512Context {
-	uint64_t	state[8];
-	uint64_t	bitcount[2];
-	uint64_t	buffer[_ffx_sha512_block_length / sizeof(uint64_t)];
+    uint32_t tot_len;
+    uint32_t len;
+    uint8_t block[2 * _ffx_sha512_block_length];
+    uint64_t h[8];
 } FfxSha512Context;
 
 typedef struct FfxHmacSha256Context {
-  uint8_t o_key_pad[_ffx_sha256_block_length];
-  FfxSha512Context ctx;
+    FfxSha256Context ctx_inside;
+    FfxSha256Context ctx_outside;
+
+    uint8_t block_ipad[_ffx_sha256_block_length];
+    uint8_t block_opad[_ffx_sha256_block_length];
 } FfxHmacSha256Context;
 
 typedef struct FfxHmacSha512Context {
-  uint8_t o_key_pad[_ffx_sha512_block_length];
-  FfxSha512Context ctx;
+    FfxSha512Context ctx_inside;
+    FfxSha512Context ctx_outside;
+
+    uint8_t block_ipad[_ffx_sha512_block_length];
+    uint8_t block_opad[_ffx_sha512_block_length];
 } FfxHmacSha512Context;
 
 
@@ -67,24 +76,29 @@ void ffx_hash_initSha256(FfxSha256Context *context);
 void ffx_hash_updateSha256(FfxSha256Context *context, const uint8_t *data,
   size_t length);
 void ffx_hash_finalSha256(FfxSha256Context *context, uint8_t *digest);
+void ffx_hash_sha256(uint8_t *digest, const uint8_t *data, size_t length);
 
-void ffx_hash_initHmacSha256(FfxHmacSha256Context *context,
+void ffx_hmac_initSha256(FfxHmacSha256Context *context,
   const uint8_t *key, size_t length);
-void ffx_hash_updateHmacSha256(FfxHmacSha256Context *context,
+void ffx_hmac_updateSha256(FfxHmacSha256Context *context,
   const uint8_t *data, size_t length);
-void ffx_hash_finalHmacSha256(FfxHmacSha256Context *context, uint8_t *hmac);
+void ffx_hmac_finalSha256(FfxHmacSha256Context *context, uint8_t *hmac);
+void ffx_hmac_sha256(uint8_t *digest, uint8_t *key, size_t keyLen,
+  uint8_t *data, size_t dataLen);
 
 void ffx_hash_initSha512(FfxSha512Context *context);
 void ffx_hash_updateSha512(FfxSha512Context *context, const uint8_t *data,
   size_t length);
 void ffx_hash_finalSha512(FfxSha512Context *context, uint8_t *digest);
+void ffx_hash_sha512(uint8_t *digest, const uint8_t *data, size_t length);
 
-void ffx_hash_initHmacSha512(FfxHmacSha512Context *context,
+void ffx_hmac_initSha512(FfxHmacSha512Context *context,
   const uint8_t *key, size_t length);
-void ffx__updateHmacSha512(FfxHmacSha512Context *context,
+void ffx_hmac_updateSha512(FfxHmacSha512Context *context,
   const uint8_t *data, size_t length);
-void ffx_hash_finalHmacSha512(FfxHmacSha512Context *context, uint8_t *hmac);
-
+void ffx_hmac_finalSha512(FfxHmacSha512Context *context, uint8_t *hmac);
+void ffx_hmac_sha512(uint8_t *digest, uint8_t *key, size_t keyLen,
+  uint8_t *data, size_t dataLen);
 
 
 #ifdef __cplusplus

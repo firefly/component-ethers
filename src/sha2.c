@@ -1,6 +1,21 @@
 /**
- * Copyright (c) 2000-2001 Aaron D. Gifford
- * Copyright (c) 2013-2014 Pavol Rusnak
+ *  Original work by Olivier Gay; see license below.
+ *
+ *  The only changes are some API name changes to retain library
+ *  naming conventions and prevent name collisions. And some unused
+ *  functionality is removed.
+ *
+ *  See original work at: https://github.com/ogay/hmac
+ *
+ *  Modified by RicMoo<me@ricmoo.com> in 2025.
+ */
+
+/*
+ * FIPS 180-2 SHA-224/256/384/512 implementation
+ * Last update: 02/02/2007
+ * Issue date:  04/30/2005
+ *
+ * Copyright (C) 2005, 2007 Olivier Gay <olivier.gay@a3.epfl.ch>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -11,14 +26,14 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. Neither the name of the copyright holder nor the names of contributors
+ * 3. Neither the name of the project nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTOR(S) ``AS IS'' AND
+ * THIS SOFTWARE IS PROVIDED BY THE PROJECT AND CONTRIBUTORS ``AS IS'' AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTOR(S) BE LIABLE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE PROJECT OR CONTRIBUTORS BE LIABLE
  * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
  * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
  * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
@@ -28,319 +43,417 @@
  * SUCH DAMAGE.
  */
 
-// See: https://aarongifford.com/computers/sha.html
-
-#include <math.h>
 
 #include <string.h>
 
 #include "firefly-hash.h"
 
-#define LITTLE_ENDIAN    1
+#define SHFR(x, n)    (x >> n)
+#define ROTR(x, n)   ((x >> n) | (x << ((sizeof(x) << 3) - n)))
+#define ROTL(x, n)   ((x << n) | (x >> ((sizeof(x) << 3) - n)))
+#define CH(x, y, z)  ((x & y) ^ (~x & z))
+#define MAJ(x, y, z) ((x & y) ^ (x & z) ^ (y & z))
 
-#if LITTLE_ENDIAN
+#define SHA256_F1(x) (ROTR(x,  2) ^ ROTR(x, 13) ^ ROTR(x, 22))
+#define SHA256_F2(x) (ROTR(x,  6) ^ ROTR(x, 11) ^ ROTR(x, 25))
+#define SHA256_F3(x) (ROTR(x,  7) ^ ROTR(x, 18) ^ SHFR(x,  3))
+#define SHA256_F4(x) (ROTR(x, 17) ^ ROTR(x, 19) ^ SHFR(x, 10))
 
-static void reverseBuffer(uint32_t *values, uint_fast8_t length) {
-    uint32_t tmp;
-    for (uint_fast8_t j = 0; j < length; j++) {
-        tmp = values[j];
-        tmp = (tmp >> 16) | (tmp << 16);
-        values[j] = ((tmp & 0xff00ff00UL) >> 8) | ((tmp & 0x00ff00ffUL) << 8);
-    }
+#define SHA512_F1(x) (ROTR(x, 28) ^ ROTR(x, 34) ^ ROTR(x, 39))
+#define SHA512_F2(x) (ROTR(x, 14) ^ ROTR(x, 18) ^ ROTR(x, 41))
+#define SHA512_F3(x) (ROTR(x,  1) ^ ROTR(x,  8) ^ SHFR(x,  7))
+#define SHA512_F4(x) (ROTR(x, 19) ^ ROTR(x, 61) ^ SHFR(x,  6))
+
+#define UNPACK32(x, str)                      \
+{                                             \
+    *((str) + 3) = (uint8_t) ((x)      );       \
+    *((str) + 2) = (uint8_t) ((x) >>  8);       \
+    *((str) + 1) = (uint8_t) ((x) >> 16);       \
+    *((str) + 0) = (uint8_t) ((x) >> 24);       \
 }
 
-#endif /* LITTLE_ENDIAN */
-
-#define SHA256_BLOCK_LENGTH   (_ffx_sha256_block_length)
-#define SHA256_DIGEST_LENGTH (FFX_SHA256_DIGEST_LENGTH)
-//#define SHA256_DIGEST_STRING_LENGTH (SHA256_DIGEST_LENGTH * 2 + 1)
-#define SHA256_SHORT_BLOCK_LENGTH (SHA256_BLOCK_LENGTH - 8)
-
-/* Shift-right (used in SHA-256, SHA-384, and SHA-512): */
-#define SHR(b, x) ((x) >> (b))
-
-/* 32-bit Rotate-right (used in SHA-256): */
-#define ROTR32(b, x) (((x) >> (b)) | ((x) << (32 - (b))))
-
-/* Two of six logical functions used in SHA-1, SHA-256, SHA-384, and SHA-512: */
-#define Ch(x, y, z) (((x) & (y)) ^ ((~(x)) & (z)))
-#define Maj(x, y, z) (((x) & (y)) ^ ((x) & (z)) ^ ((y) & (z)))
-
-/* Four of six logical functions used in SHA-256: */
-#define Sigma0_256(x) (ROTR32(2, (x)) ^ ROTR32(13, (x)) ^ ROTR32(22, (x)))
-#define Sigma1_256(x) (ROTR32(6, (x)) ^ ROTR32(11, (x)) ^ ROTR32(25, (x)))
-#define sigma0_256(x) (ROTR32(7, (x)) ^ ROTR32(18, (x)) ^ SHR(3, (x)))
-#define sigma1_256(x) (ROTR32(17, (x)) ^ ROTR32(19, (x)) ^ SHR(10, (x)))
-
-// https://github.com/jedisct1/libsodium/blob/1647f0d53ae0e370378a9195477e3df0a792408f/src/libsodium/sodium/utils.c#L102-L130
-static void memzero(uint8_t *dst, uint32_t length) {
-    memset(dst, 0, length);
-    /*
-    volatile unsigned char *volatile dst = (volatile unsigned char *volatile) dst;
-    size_t i = (size_t) 0U;
-
-    while (i < length) {
-        dst[i++] = 0U;
-    }
-    */
+#define PACK32(str, x)                        \
+{                                             \
+    *(x) =   ((uint32_t) *((str) + 3)      )    \
+           | ((uint32_t) *((str) + 2) <<  8)    \
+           | ((uint32_t) *((str) + 1) << 16)    \
+           | ((uint32_t) *((str) + 0) << 24);   \
 }
 
-
-static const uint32_t kHi[] = {
-    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1,
-    0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
-    0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786,
-    0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
-    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147,
-    0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
-    0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b,
-    0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
-    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a,
-    0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
-    0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2, 0xca273ece, 0xd186b8c7,
-    0xeada7dd6, 0xf57d4f7f, 0x06f067aa, 0x0a637dc5, 0x113f9804, 0x1b710b35,
-    0x28db77f5, 0x32caab7b, 0x3c9ebe0a, 0x431d67c4, 0x4cc5d4be, 0x597f299c,
-    0x5fcb6fab, 0x6c44198c
-};
-
-static const uint32_t kLo[] = {
-     0xd728ae22, 0x23ef65cd, 0xec4d3b2f, 0x8189dbbc, 0xf348b538, 0xb605d019,
-     0xaf194f9b, 0xda6d8118, 0xa3030242, 0x45706fbe, 0x4ee4b28c, 0xd5ffb4e2,
-     0xf27b896f, 0x3b1696b1, 0x25c71235, 0xcf692694, 0x9ef14ad2, 0x384f25e3,
-     0x8b8cd5b5, 0x77ac9c65, 0x592b0275, 0x6ea6e483, 0xbd41fbd4, 0x831153b5,
-     0xee66dfab, 0x2db43210, 0x98fb213f, 0xbeef0ee4, 0x3da88fc2, 0x930aa725,
-     0xe003826f, 0x0a0e6e70, 0x46d22ffc, 0x5c26c926, 0x5ac42aed, 0x9d95b3df,
-     0x8baf63de, 0x3c77b2a8, 0x47edaee6, 0x1482353b, 0x4cf10364, 0xbc423001,
-     0xd0f89791, 0x0654be30, 0xd6ef5218, 0x5565a910, 0x5771202a, 0x32bbd1b8,
-     0xb8d2d0c8, 0x5141ab53, 0xdf8eeb99, 0xe19b48a8, 0xc5c95a63, 0xe3418acb,
-     0x7763e373, 0xd6b2b8a3, 0x5defb2fc, 0x43172f60, 0xa1f0ab72, 0x1a6439ec,
-     0x23631e28, 0xde82bde9, 0xb2c67915, 0xe372532b, 0xea26619c, 0x21c0c207,
-     0xcde0eb1e, 0xee6ed178, 0x72176fba, 0xa2c898a6, 0xbef90dae, 0x131c471b,
-     0x23047d84, 0x40c72493, 0x15c9bebc, 0x9c100d4c, 0xcb3e42b6, 0xfc657e2a,
-     0x3ad6faec, 0x4a475817
-};
-
-static const uint32_t kInitHi[] = {
-    0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
-    0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
-};
-
-static const uint32_t kInitLo[] = {
-    0xf3bcc908, 0x84caa73b, 0xfe94f82b, 0x5f1d36f1,
-    0xade682d1, 0x2b3e6c1f, 0xfb41bd6b, 0x137e2179
-};
-
-static uint32_t getConstant256(uint32_t index, uint32_t init) {
-    if (init) { return kInitHi[index]; }
-    return kHi[index];
+#define UNPACK64(x, str)                      \
+{                                             \
+    *((str) + 7) = (uint8_t) ((x)      );       \
+    *((str) + 6) = (uint8_t) ((x) >>  8);       \
+    *((str) + 5) = (uint8_t) ((x) >> 16);       \
+    *((str) + 4) = (uint8_t) ((x) >> 24);       \
+    *((str) + 3) = (uint8_t) ((x) >> 32);       \
+    *((str) + 2) = (uint8_t) ((x) >> 40);       \
+    *((str) + 1) = (uint8_t) ((x) >> 48);       \
+    *((str) + 0) = (uint8_t) ((x) >> 56);       \
 }
 
-static uint64_t getConstant512(uint32_t index, uint32_t init) {
-    if (init) { return  ((uint64_t)kInitHi[index] << 32) | kInitLo[index]; }
-    return  ((uint64_t)kHi[index] << 32) | kLo[index];;
+#define PACK64(str, x)                        \
+{                                             \
+    *(x) =   ((uint64_t) *((str) + 7)      )    \
+           | ((uint64_t) *((str) + 6) <<  8)    \
+           | ((uint64_t) *((str) + 5) << 16)    \
+           | ((uint64_t) *((str) + 4) << 24)    \
+           | ((uint64_t) *((str) + 3) << 32)    \
+           | ((uint64_t) *((str) + 2) << 40)    \
+           | ((uint64_t) *((str) + 1) << 48)    \
+           | ((uint64_t) *((str) + 0) << 56);   \
 }
 
-/*
-static const uint32_t K256_2[] = {
-    0x6a09e667UL,
-	0xbb67ae85UL,
-	0x3c6ef372UL,
-	0xa54ff53aUL,
-	0x510e527fUL,
-	0x9b05688cUL,
-	0x1f83d9abUL,
-	0x5be0cd19UL
-};
-*/
-/*
-static const uint32_t K256_3[64] = {
-	0x428a2f98UL, 0x71374491UL, 0xb5c0fbcfUL, 0xe9b5dba5UL,
-	0x3956c25bUL, 0x59f111f1UL, 0x923f82a4UL, 0xab1c5ed5UL,
-	0xd807aa98UL, 0x12835b01UL, 0x243185beUL, 0x550c7dc3UL,
-	0x72be5d74UL, 0x80deb1feUL, 0x9bdc06a7UL, 0xc19bf174UL,
-	0xe49b69c1UL, 0xefbe4786UL, 0x0fc19dc6UL, 0x240ca1ccUL,
-	0x2de92c6fUL, 0x4a7484aaUL, 0x5cb0a9dcUL, 0x76f988daUL,
-	0x983e5152UL, 0xa831c66dUL, 0xb00327c8UL, 0xbf597fc7UL,
-	0xc6e00bf3UL, 0xd5a79147UL, 0x06ca6351UL, 0x14292967UL,
-	0x27b70a85UL, 0x2e1b2138UL, 0x4d2c6dfcUL, 0x53380d13UL,
-	0x650a7354UL, 0x766a0abbUL, 0x81c2c92eUL, 0x92722c85UL,
-	0xa2bfe8a1UL, 0xa81a664bUL, 0xc24b8b70UL, 0xc76c51a3UL,
-	0xd192e819UL, 0xd6990624UL, 0xf40e3585UL, 0x106aa070UL,
-	0x19a4c116UL, 0x1e376c08UL, 0x2748774cUL, 0x34b0bcb5UL,
-	0x391c0cb3UL, 0x4ed8aa4aUL, 0x5b9cca4fUL, 0x682e6ff3UL,
-	0x748f82eeUL, 0x78a5636fUL, 0x84c87814UL, 0x8cc70208UL,
-	0x90befffaUL, 0xa4506cebUL, 0xbef9a3f7UL, 0xc67178f2UL
-};
-*/
-void ffx_hash_initSha256(FfxSha256Context *context) {
-    for (int_fast8_t i = 0; i < 8; i++) {
-        context->state[i] = getConstant256(i, 1);
-    }
-    for (uint_fast8_t i = 0; i < (64 / sizeof(uint32_t)); i++) {
-        context->buffer[i] = 0;
-    }
-    context->bitCount = 0;
+/* Macros used for loops unrolling */
+
+#define SHA256_SCR(i)                         \
+{                                             \
+    w[i] =  SHA256_F4(w[i -  2]) + w[i -  7]  \
+          + SHA256_F3(w[i - 15]) + w[i - 16]; \
 }
 
-static void sha256_Transform(const uint32_t *state_in, const uint32_t *data, uint32_t *state_out) {
-    uint32_t working[8];
-    uint32_t s0, s1;
-    uint32_t T1, T2, W256[16];
+#define SHA512_SCR(i)                         \
+{                                             \
+    w[i] =  SHA512_F4(w[i -  2]) + w[i -  7]  \
+          + SHA512_F3(w[i - 15]) + w[i - 16]; \
+}
 
-    /* Initialize registers with the prev. intermediate value */
-    for (int_fast8_t i = 7; i >= 0; i--) {
-        working[i] = state_in[i];
-    }
+#define SHA256_EXP(a, b, c, d, e, f, g, h, j)               \
+{                                                           \
+    t1 = wv[h] + SHA256_F2(wv[e]) + CH(wv[e], wv[f], wv[g]) \
+         + sha256_k[j] + w[j];                              \
+    t2 = SHA256_F1(wv[a]) + MAJ(wv[a], wv[b], wv[c]);       \
+    wv[d] += t1;                                            \
+    wv[h] = t1 + t2;                                        \
+}
 
-    for (uint_fast8_t j = 0; j < 16; j++) {
-        /* Apply the SHA-256 compression function to update a..h with copy */
-        T1 = working[7] + Sigma1_256(working[4]) + Ch(working[4], working[5], working[6]) + getConstant256(j, 0) + (W256[j] = *data++);
-        T2 = Sigma0_256(working[0]) + Maj(working[0], working[1], working[2]);
-        for (int_fast8_t i = 7; i > 0; i--) {
-            working[i] = working[i - 1];
+#define SHA512_EXP(a, b, c, d, e, f, g ,h, j)               \
+{                                                           \
+    t1 = wv[h] + SHA512_F2(wv[e]) + CH(wv[e], wv[f], wv[g]) \
+         + sha512_k[j] + w[j];                              \
+    t2 = SHA512_F1(wv[a]) + MAJ(wv[a], wv[b], wv[c]);       \
+    wv[d] += t1;                                            \
+    wv[h] = t1 + t2;                                        \
+}
+
+uint32_t sha256_h0[8] =
+            {0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+             0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19};
+
+uint64_t sha512_h0[8] =
+            {0x6a09e667f3bcc908ULL, 0xbb67ae8584caa73bULL,
+             0x3c6ef372fe94f82bULL, 0xa54ff53a5f1d36f1ULL,
+             0x510e527fade682d1ULL, 0x9b05688c2b3e6c1fULL,
+             0x1f83d9abfb41bd6bULL, 0x5be0cd19137e2179ULL};
+
+uint32_t sha256_k[64] =
+            {0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,
+             0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+             0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
+             0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+             0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc,
+             0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+             0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
+             0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+             0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
+             0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+             0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3,
+             0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+             0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5,
+             0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+             0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
+             0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2};
+
+uint64_t sha512_k[80] =
+            {0x428a2f98d728ae22ULL, 0x7137449123ef65cdULL,
+             0xb5c0fbcfec4d3b2fULL, 0xe9b5dba58189dbbcULL,
+             0x3956c25bf348b538ULL, 0x59f111f1b605d019ULL,
+             0x923f82a4af194f9bULL, 0xab1c5ed5da6d8118ULL,
+             0xd807aa98a3030242ULL, 0x12835b0145706fbeULL,
+             0x243185be4ee4b28cULL, 0x550c7dc3d5ffb4e2ULL,
+             0x72be5d74f27b896fULL, 0x80deb1fe3b1696b1ULL,
+             0x9bdc06a725c71235ULL, 0xc19bf174cf692694ULL,
+             0xe49b69c19ef14ad2ULL, 0xefbe4786384f25e3ULL,
+             0x0fc19dc68b8cd5b5ULL, 0x240ca1cc77ac9c65ULL,
+             0x2de92c6f592b0275ULL, 0x4a7484aa6ea6e483ULL,
+             0x5cb0a9dcbd41fbd4ULL, 0x76f988da831153b5ULL,
+             0x983e5152ee66dfabULL, 0xa831c66d2db43210ULL,
+             0xb00327c898fb213fULL, 0xbf597fc7beef0ee4ULL,
+             0xc6e00bf33da88fc2ULL, 0xd5a79147930aa725ULL,
+             0x06ca6351e003826fULL, 0x142929670a0e6e70ULL,
+             0x27b70a8546d22ffcULL, 0x2e1b21385c26c926ULL,
+             0x4d2c6dfc5ac42aedULL, 0x53380d139d95b3dfULL,
+             0x650a73548baf63deULL, 0x766a0abb3c77b2a8ULL,
+             0x81c2c92e47edaee6ULL, 0x92722c851482353bULL,
+             0xa2bfe8a14cf10364ULL, 0xa81a664bbc423001ULL,
+             0xc24b8b70d0f89791ULL, 0xc76c51a30654be30ULL,
+             0xd192e819d6ef5218ULL, 0xd69906245565a910ULL,
+             0xf40e35855771202aULL, 0x106aa07032bbd1b8ULL,
+             0x19a4c116b8d2d0c8ULL, 0x1e376c085141ab53ULL,
+             0x2748774cdf8eeb99ULL, 0x34b0bcb5e19b48a8ULL,
+             0x391c0cb3c5c95a63ULL, 0x4ed8aa4ae3418acbULL,
+             0x5b9cca4f7763e373ULL, 0x682e6ff3d6b2b8a3ULL,
+             0x748f82ee5defb2fcULL, 0x78a5636f43172f60ULL,
+             0x84c87814a1f0ab72ULL, 0x8cc702081a6439ecULL,
+             0x90befffa23631e28ULL, 0xa4506cebde82bde9ULL,
+             0xbef9a3f7b2c67915ULL, 0xc67178f2e372532bULL,
+             0xca273eceea26619cULL, 0xd186b8c721c0c207ULL,
+             0xeada7dd6cde0eb1eULL, 0xf57d4f7fee6ed178ULL,
+             0x06f067aa72176fbaULL, 0x0a637dc5a2c898a6ULL,
+             0x113f9804bef90daeULL, 0x1b710b35131c471bULL,
+             0x28db77f523047d84ULL, 0x32caab7b40c72493ULL,
+             0x3c9ebe0a15c9bebcULL, 0x431d67c49c100d4cULL,
+             0x4cc5d4becb3e42b6ULL, 0x597f299cfc657e2aULL,
+             0x5fcb6fab3ad6faecULL, 0x6c44198c4a475817ULL};
+
+/* SHA-256 functions */
+
+static void sha256_transf(FfxSha256Context *ctx, const uint8_t *message,
+                   size_t block_nb)
+{
+    uint32_t w[64];
+    uint32_t wv[8];
+    uint32_t t1, t2;
+    const uint8_t *sub_block;
+    int i;
+
+    int j;
+
+    for (i = 0; i < (int) block_nb; i++) {
+        sub_block = message + (i << 6);
+
+        for (j = 0; j < 16; j++) {
+            PACK32(&sub_block[j << 2], &w[j]);
         }
-        working[4] += T1;
-        working[0] = T1 + T2;
-    }
 
-    for (uint8_t j = 16; j < 64; j++) {
-        /* Part of the message block expansion: */
-        s0 = W256[(j + 1) & 0x0f];
-        s0 = sigma0_256(s0);
-        s1 = W256[(j + 14) & 0x0f];
-        s1 = sigma1_256(s1);
-
-        /* Apply the SHA-256 compression function to update a..h */
-        T1 = working[7] + Sigma1_256(working[4]) + Ch(working[4], working[5], working[6]) + getConstant256(j, 0) +
-             (W256[j & 0x0f] += s1 + W256[(j + 9) & 0x0f] + s0);
-        T2 = Sigma0_256(working[0]) + Maj(working[0], working[1], working[2]);
-
-        for (int_fast8_t i = 7; i > 0; i--) {
-            working[i] = working[i - 1];
+        for (j = 16; j < 64; j++) {
+            SHA256_SCR(j);
         }
-        working[4] += T1;
-        working[0] = T1 + T2;
-    }
 
-    /* Compute the current intermediate hash value */
-    for (int_fast8_t i = 7; i >= 0; i--) {
-        state_out[i] = state_in[i] + working[i];
-        working[i] = 0;
-    }
+        for (j = 0; j < 8; j++) {
+            wv[j] = ctx->h[j];
+        }
 
-    /* Clean up */
-    T1 = T2 = 0;
-}
+        for (j = 0; j < 64; j++) {
+            t1 = wv[7] + SHA256_F2(wv[4]) + CH(wv[4], wv[5], wv[6])
+                + sha256_k[j] + w[j];
+            t2 = SHA256_F1(wv[0]) + MAJ(wv[0], wv[1], wv[2]);
+            wv[7] = wv[6];
+            wv[6] = wv[5];
+            wv[5] = wv[4];
+            wv[4] = wv[3] + t1;
+            wv[3] = wv[2];
+            wv[2] = wv[1];
+            wv[1] = wv[0];
+            wv[0] = t1 + t2;
+        }
 
-#define MAX_UINT32 (0xffffffff)
-static void increment_bitcount(FfxSha256Context *context, uint32_t count) {
-    if (context->bitCount >= MAX_UINT32 - count) {
-        //FFCrash(CrashReasonOutOfBounds);
-        while(1); //@TODO: return an error
-    }
-    context->bitCount += count;
-}
-
-void ffx_hash_updateSha256(FfxSha256Context *context, const uint8_t *data,
-  size_t dataLength) {
-    if (dataLength == 0) { return; }
-
-    unsigned int freespace, usedspace;
-
-    usedspace = (context->bitCount >> 3) % SHA256_BLOCK_LENGTH;
-    if (usedspace > 0) {
-        /* Calculate how much free space is available in the buffer */
-        freespace = SHA256_BLOCK_LENGTH - usedspace;
-
-        if (dataLength >= freespace) {
-            /* Fill the buffer completely and process it */
-            memcpy(((uint8_t *)context->buffer) + usedspace, data, freespace);
-            // context->bitCount += freespace << 3;
-            increment_bitcount(context, freespace << 3);
-            dataLength -= freespace;
-            data += freespace;
-#if LITTLE_ENDIAN
-            /* Convert TO host byte order */
-            reverseBuffer(context->buffer, 16);
-#endif
-            sha256_Transform(context->state, context->buffer, context->state);
-        } else {
-            /* The buffer is not yet full */
-            memcpy(((uint8_t *)context->buffer) + usedspace, data, dataLength);
-            // context->bitCount += dataLength << 3;
-            increment_bitcount(context, dataLength << 3);
-            /* Clean up: */
-            usedspace = freespace = 0;
-            return;
+        for (j = 0; j < 8; j++) {
+            ctx->h[j] += wv[j];
         }
     }
-    while (dataLength >= SHA256_BLOCK_LENGTH) {
-        /* Process as many complete blocks as we can */
-        memcpy(context->buffer, data, SHA256_BLOCK_LENGTH);
-#if LITTLE_ENDIAN
-        /* Convert TO host byte order */
-        reverseBuffer(context->buffer, 16);
-#endif
-        sha256_Transform(context->state, context->buffer, context->state);
-        // context->bitCount += SHA256_BLOCK_LENGTH << 3;
-        increment_bitcount(context, SHA256_BLOCK_LENGTH << 3);
-        dataLength -= SHA256_BLOCK_LENGTH;
-        data += SHA256_BLOCK_LENGTH;
-    }
-    if (dataLength > 0) {
-        /* There's left-overs, so save 'em */
-        memcpy(context->buffer, data, dataLength);
-        // context->bitCount += dataLength << 3;
-        increment_bitcount(context, dataLength << 3);
-    }
-    /* Clean up: */
-    usedspace = freespace = 0;
 }
 
-void ffx_hash_finalSha256(FfxSha256Context *context, uint8_t *digest) {
-    unsigned int usedspace;
+void ffx_hash_sha256(uint8_t *digest, const uint8_t *message, size_t len)
+{
+    FfxSha256Context ctx;
 
-    usedspace = (context->bitCount >> 3) % SHA256_BLOCK_LENGTH;
-
-    /* Begin padding with a 1 bit: */
-    ((uint8_t *)context->buffer)[usedspace++] = 0x80;
-
-    if (usedspace > SHA256_SHORT_BLOCK_LENGTH) {
-        memzero(((uint8_t *)context->buffer) + usedspace, SHA256_BLOCK_LENGTH - usedspace);
-
-#if LITTLE_ENDIAN
-        /* Convert TO host byte order */
-        reverseBuffer(context->buffer, 16);
-#endif
-        /* Do second-to-last transform: */
-        sha256_Transform(context->state, context->buffer, context->state);
-
-        /* And prepare the last transform: */
-        usedspace = 0;
-    }
-    /* Set-up for the last transform: */
-    memzero(((uint8_t *)context->buffer) + usedspace, SHA256_SHORT_BLOCK_LENGTH - usedspace);
-
-#if LITTLE_ENDIAN
-    /* Convert TO host byte order */
-    reverseBuffer(context->buffer, 14);
-#endif
-    /* Set the bit count: */
-    // context->buffer[14] = context->bitCount >> 32;
-    context->buffer[14] = 0;
-    context->buffer[15] = context->bitCount & 0xffffffff;
-
-    /* Final transform: */
-    sha256_Transform(context->state, context->buffer, context->state);
-
-#if LITTLE_ENDIAN
-    /* Convert FROM host byte order */
-    reverseBuffer(context->state, 8);
-#endif
-    memcpy(digest, context->state, SHA256_DIGEST_LENGTH);
-
-    /* Clean up state data: */
-    memzero((uint8_t*)context, sizeof(FfxSha256Context));
-    usedspace = 0;
+    ffx_hash_initSha256(&ctx);
+    ffx_hash_updateSha256(&ctx, message, len);
+    ffx_hash_finalSha256(&ctx, digest);
 }
 
+void ffx_hash_initSha256(FfxSha256Context *ctx)
+{
+    int i;
+    for (i = 0; i < 8; i++) {
+        ctx->h[i] = sha256_h0[i];
+    }
+
+    ctx->len = 0;
+    ctx->tot_len = 0;
+}
+
+void ffx_hash_updateSha256(FfxSha256Context *ctx, const uint8_t *message,
+                   size_t len)
+{
+    size_t block_nb;
+    size_t new_len, rem_len, tmp_len;
+    const uint8_t *shifted_message;
+
+    tmp_len = _ffx_sha256_block_length - ctx->len;
+    rem_len = len < tmp_len ? len : tmp_len;
+
+    memcpy(&ctx->block[ctx->len], message, rem_len);
+
+    if (ctx->len + len < _ffx_sha256_block_length) {
+        ctx->len += len;
+        return;
+    }
+
+    new_len = len - rem_len;
+    block_nb = new_len / _ffx_sha256_block_length;
+
+    shifted_message = message + rem_len;
+
+    sha256_transf(ctx, ctx->block, 1);
+    sha256_transf(ctx, shifted_message, block_nb);
+
+    rem_len = new_len % _ffx_sha256_block_length;
+
+    memcpy(ctx->block, &shifted_message[block_nb << 6],
+           rem_len);
+
+    ctx->len = rem_len;
+    ctx->tot_len += (block_nb + 1) << 6;
+}
+
+void ffx_hash_finalSha256(FfxSha256Context *ctx, uint8_t *digest)
+{
+    size_t block_nb;
+    size_t pm_len;
+    size_t len_b;
+
+    int i;
+
+    block_nb = (1 + ((_ffx_sha256_block_length - 9)
+                     < (ctx->len % _ffx_sha256_block_length)));
+
+    len_b = (ctx->tot_len + ctx->len) << 3;
+    pm_len = block_nb << 6;
+
+    memset(ctx->block + ctx->len, 0, pm_len - ctx->len);
+    ctx->block[ctx->len] = 0x80;
+    UNPACK32(len_b, ctx->block + pm_len - 4);
+
+    sha256_transf(ctx, ctx->block, block_nb);
+
+    for (i = 0 ; i < 8; i++) {
+        UNPACK32(ctx->h[i], &digest[i << 2]);
+    }
+}
+
+/* SHA-512 functions */
+
+static void sha512_transf(FfxSha512Context *ctx, const uint8_t *message,
+                   size_t block_nb)
+{
+    uint64_t w[80];
+    uint64_t wv[8];
+    uint64_t t1, t2;
+    const uint8_t *sub_block;
+    int i, j;
+
+    for (i = 0; i < (int) block_nb; i++) {
+        sub_block = message + (i << 7);
+
+        for (j = 0; j < 16; j++) {
+            PACK64(&sub_block[j << 3], &w[j]);
+        }
+
+        for (j = 16; j < 80; j++) {
+            SHA512_SCR(j);
+        }
+
+        for (j = 0; j < 8; j++) {
+            wv[j] = ctx->h[j];
+        }
+
+        for (j = 0; j < 80; j++) {
+            t1 = wv[7] + SHA512_F2(wv[4]) + CH(wv[4], wv[5], wv[6])
+                + sha512_k[j] + w[j];
+            t2 = SHA512_F1(wv[0]) + MAJ(wv[0], wv[1], wv[2]);
+            wv[7] = wv[6];
+            wv[6] = wv[5];
+            wv[5] = wv[4];
+            wv[4] = wv[3] + t1;
+            wv[3] = wv[2];
+            wv[2] = wv[1];
+            wv[1] = wv[0];
+            wv[0] = t1 + t2;
+        }
+
+        for (j = 0; j < 8; j++) {
+            ctx->h[j] += wv[j];
+        }
+    }
+}
+
+void ffx_hash_sha512(uint8_t *digest, const uint8_t *message, size_t len)
+{
+    FfxSha512Context ctx;
+
+    ffx_hash_initSha512(&ctx);
+    ffx_hash_updateSha512(&ctx, message, len);
+    ffx_hash_finalSha512(&ctx, digest);
+}
+
+void ffx_hash_initSha512(FfxSha512Context *ctx)
+{
+    int i;
+    for (i = 0; i < 8; i++) {
+        ctx->h[i] = sha512_h0[i];
+    }
+
+    ctx->len = 0;
+    ctx->tot_len = 0;
+}
+
+void ffx_hash_updateSha512(FfxSha512Context *ctx, const uint8_t *message,
+                   size_t len)
+{
+    size_t block_nb;
+    size_t new_len, rem_len, tmp_len;
+    const uint8_t *shifted_message;
+
+    tmp_len = _ffx_sha512_block_length - ctx->len;
+    rem_len = len < tmp_len ? len : tmp_len;
+
+    memcpy(&ctx->block[ctx->len], message, rem_len);
+
+    if (ctx->len + len < _ffx_sha512_block_length) {
+        ctx->len += len;
+        return;
+    }
+
+    new_len = len - rem_len;
+    block_nb = new_len / _ffx_sha512_block_length;
+
+    shifted_message = message + rem_len;
+
+    sha512_transf(ctx, ctx->block, 1);
+    sha512_transf(ctx, shifted_message, block_nb);
+
+    rem_len = new_len % _ffx_sha512_block_length;
+
+    memcpy(ctx->block, &shifted_message[block_nb << 7],
+           rem_len);
+
+    ctx->len = rem_len;
+    ctx->tot_len += (block_nb + 1) << 7;
+}
+
+void ffx_hash_finalSha512(FfxSha512Context *ctx, uint8_t *digest)
+{
+    size_t block_nb;
+    size_t pm_len;
+    size_t len_b;
+
+    int i;
+
+    block_nb = 1 + ((_ffx_sha512_block_length - 17)
+                     < (ctx->len % _ffx_sha512_block_length));
+
+    len_b = (ctx->tot_len + ctx->len) << 3;
+    pm_len = block_nb << 7;
+
+    memset(ctx->block + ctx->len, 0, pm_len - ctx->len);
+    ctx->block[ctx->len] = 0x80;
+    UNPACK32(len_b, ctx->block + pm_len - 4);
+
+    sha512_transf(ctx, ctx->block, block_nb);
+
+    for (i = 0 ; i < 8; i++) {
+        UNPACK64(ctx->h[i], &digest[i << 3]);
+    }
+}

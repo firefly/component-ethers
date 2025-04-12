@@ -7,7 +7,7 @@
  *
  * Changes include:
  *  - Signatures are normalized to the canonical S value
- *  - The recid (27 or 29) is appended to signatures
+ *  - The recid (27 or 28) is appended to signatures
  *  - Fully compliant with RFC6979 (based on PR#51)
  *  - Dropped support for secp160r1 (conflicts with RFC6979)
  *  - secp256k1_ prefix added to exported function to protect from esp32 aliasing
@@ -42,15 +42,19 @@
  */
 
 #include <stdint.h>
+#include <string.h>
+
+// DEBUG
+#include <stdio.h>
 
 #include "firefly-crypto.h"
 
 #include "firefly-hash.h"
 
-// #include "uECC.h"
-
 #define ECC_SUCCESS  (true)
 #define ECC_ERROR    (false)
+
+// #include "uECC.h"
 
 struct uECC_Curve_t;
 typedef const struct uECC_Curve_t *uECC_Curve;
@@ -91,13 +95,18 @@ typedef uint64_t uECC_dword_t;
 #define uECC_WORD_BITS_SHIFT 5
 #define uECC_WORD_BITS_MASK 0x01F
 
+/* </_UECC_TYPES_H_> */
+
 
 // <RicMoo>
-// See: #51
+// PR:#51 (#include "uECC.h")
 #define uECC_n_size_4 32 /* secp256k1 */
 
 #define uECC_N_BYTES uECC_CONCAT(uECC_n_size_, uECC_CURVE)
 // </RicMoo>
+
+
+// "uECC.c"
 
 #ifndef uECC_RNG_MAX_TRIES
 #define uECC_RNG_MAX_TRIES 64
@@ -1124,6 +1133,55 @@ static void XYcZ_addC(uECC_word_t *X1,
     uECC_vli_set(X1, t7, num_words);
 }
 
+// <Ricmoo>
+//  See #197
+/* Compute P + Q */
+static void EccPoint_add(uECC_word_t * result,
+                         const uECC_word_t * P,
+                         const uECC_word_t * Q,
+                         uECC_Curve curve) {
+
+    // Variables for x, y and z coordinates for P and Q
+    uECC_word_t Px[uECC_MAX_WORDS];
+    uECC_word_t Py[uECC_MAX_WORDS];
+    uECC_word_t Qx[uECC_MAX_WORDS];
+    uECC_word_t Qy[uECC_MAX_WORDS];
+    uECC_word_t z[uECC_MAX_WORDS];
+    wordcount_t num_words = curve->num_words;
+
+    /* Get P = (Px, Py) and Q = (Qx, Qy) */
+    uECC_vli_set(Px, P, num_words);
+    uECC_vli_set(Py, P + num_words, num_words);
+    uECC_vli_set(Qx, Q, num_words);
+    uECC_vli_set(Qy, Q + num_words, num_words);
+
+    // If P = Q, the formula is not the same.
+    if (1 == uECC_vli_equal(P, Q, 2*curve->num_words)) {
+      // Perform point doubling by coordinate
+      // Before call: (Qx , Qy ) = Q   and (Px , Py ) = P
+      // After  call: (Qx', Qy') = 2Q  and (Px', Py') = P'
+      XYcZ_initial_double(Qx, Qy, Px, Py, 0, curve);
+    }
+    else {
+      /* Compute the final 1/Z value */
+      uECC_vli_modSub(z, Qx, Px, curve->p, num_words); /* (Qx - Px) or (x2 - x1) */
+      uECC_vli_modInv(z, z, curve->p, num_words);            /* 1 / (x2 - x1) */
+
+      // Perform point addition by coordinate
+      // Before call: (Px , Py ) = P   and (Qx , Qy ) = Q
+      // After  call: (Px', Py') = P'  and (Qx', Qy') = P + Q
+      XYcZ_add(Px, Py, Qx, Qy, curve);
+
+      // Remove the extra (x2-x1)² and (x2-x1)³ of Qx and Qy respectively.
+      apply_z(Qx, Qy, z, curve);
+    }
+
+    // Store result in the return variable
+    uECC_vli_set(result, Qx, num_words);
+    uECC_vli_set(result + num_words, Qy, num_words);
+}
+// </Ricmoo>
+
 /* result may overlap point. */
 static void EccPoint_mult(uECC_word_t *result,
                           const uECC_word_t *point,
@@ -1353,15 +1411,18 @@ static bool uECC_compute_public_key(const uint8_t *private_key, uint8_t *public_
 
     /* Make sure the private key is in the range [1, n-1]. */
     if (uECC_vli_isZero(_private, BITS_TO_WORDS(curve->num_n_bits))) {
+printf("foo1\n");
         return ECC_ERROR;
     }
 
     if (uECC_vli_cmp(curve->n, _private, BITS_TO_WORDS(curve->num_n_bits)) != 1) {
+printf("foo2\n");
         return ECC_ERROR;
     }
 
     /* Compute public key. */
     if (!EccPoint_compute_public_key(_public, _private, curve)) {
+printf("foo3\n");
         return ECC_ERROR;
     }
 
@@ -1369,6 +1430,7 @@ static bool uECC_compute_public_key(const uint8_t *private_key, uint8_t *public_
     uECC_vli_nativeToBytes(
         public_key + curve->num_bytes, curve->num_bytes, _public + curve->num_words);
 
+printf("foo5\n");
     return ECC_SUCCESS;
 }
 
@@ -1674,6 +1736,7 @@ static bitcount_t smax(bitcount_t a, bitcount_t b) {
     return (a > b ? a : b);
 }
 
+
 static int uECC_verify(const uint8_t *public_key,
                        const uint8_t *message_hash,
                        unsigned hash_size,
@@ -1782,7 +1845,7 @@ static int uECC_verify(const uint8_t *public_key,
 // <RicMoo>
 // Public Interface
 
-//#include "crypto/sha2.h"
+//#include "firefly-hash.h"
 
 typedef struct HashContext {
     uECC_HashContext uECC;
@@ -1804,8 +1867,7 @@ static void finish_SHA256(const uECC_HashContext *base, uint8_t *hash_result) {
     ffx_hash_finalSha256(&context->ctx, hash_result);
 }
 
-bool ffx_pk_signSecp256k1(uint8_t *privkey, uint8_t *digest,
-  uint8_t *signature) {
+bool ffx_pk_signSecp256k1(uint8_t *sigOut, uint8_t *privkey, uint8_t *digest) {
 
     uint8_t tmp[32 + 32 + 64];
 // @TODO: This dones't need to be nested structs...
@@ -1820,36 +1882,44 @@ bool ffx_pk_signSecp256k1(uint8_t *privkey, uint8_t *digest,
         },
     };
 
-    return uECC_sign_deterministic(privkey, digest, 32, &ctx.uECC, signature,
+    return uECC_sign_deterministic(privkey, digest, 32, &ctx.uECC, sigOut,
       uECC_secp256k1());
 }
 
 //int32_t secp256k1_verify(uint8_t *digest, uint8_t *signature, uint8_t *publicKey) {
 //}
 
-bool ffx_pk_computePubkeySecp256k1(uint8_t *privkey,
-  uint8_t *pubkey) {
-    pubkey[0] = 0x04;
-    return uECC_compute_public_key(privkey, &pubkey[1], uECC_secp256k1());
+bool ffx_pk_computePubkeySecp256k1(uint8_t *pubkeyOut, uint8_t *privkey) {
+    pubkeyOut[0] = 0x04;
+    return uECC_compute_public_key(privkey, &pubkeyOut[1], uECC_secp256k1());
 }
 
-void ffx_pk_compressPubkeySecp256k1(uint8_t *pubkey, uint8_t *compPubkey) {
-    uECC_compress(&pubkey[1], compPubkey, uECC_secp256k1());
+void ffx_pk_compressPubkeySecp256k1(uint8_t *pubkeyOut, uint8_t *pubkey) {
+    if (pubkey[0] == 4) {
+        uECC_compress(&pubkey[1], pubkeyOut, uECC_secp256k1());
+    } else {
+        memmove(pubkeyOut, pubkey, 33);
+    }
 }
 
-void ffx_pk_decompressPubkeySecp256k1(uint8_t *compPubkey, uint8_t *pubkey) {
-    uECC_decompress(compPubkey, pubkey, uECC_secp256k1());
+void ffx_pk_decompressPubkeySecp256k1(uint8_t *pubkeyOut, uint8_t *pubkey) {
+    if (pubkey[0] == 4) {
+        memmove(pubkeyOut, pubkey, 65);
+    } else {
+        pubkeyOut[0] = 4;
+        uECC_decompress(pubkey, &pubkeyOut[1], uECC_secp256k1());
+    }
 }
 
-bool ffx_pk_computeSharedSecretSecp256k1(uint8_t *privkey,
-  uint8_t *otherPubkey, uint8_t *sharedSecret) {
-    return uECC_shared_secret(otherPubkey, privkey, sharedSecret,
+bool ffx_pk_computeSharedSecretSecp256k1(uint8_t *secretOut, uint8_t *privkey,
+  uint8_t *otherPubkey) {
+    // @TODO: convert compressed to uncompressed if necessary
+    return uECC_shared_secret(otherPubkey, privkey, secretOut,
       uECC_secp256k1());
 }
 
 
-bool ffx_pk_signP256(uint8_t *privkey, uint8_t *digest,
-  uint8_t *signature) {
+bool ffx_pk_signP256(uint8_t *sigOut, uint8_t *privkey, uint8_t *digest) {
 
     uint8_t tmp[32 + 32 + 64];
 // @TODO: This dones't need to be nested structs...
@@ -1864,28 +1934,74 @@ bool ffx_pk_signP256(uint8_t *privkey, uint8_t *digest,
         },
     };
 
-    return uECC_sign_deterministic(privkey, digest, 32, &ctx.uECC, signature,
+    return uECC_sign_deterministic(privkey, digest, 32, &ctx.uECC, sigOut,
       uECC_secp256r1());
 }
 
-bool ffx_pk_computePublicKeyP256(uint8_t *privkey,
-  uint8_t *pubkey) {
-    pubkey[0] = 0x04;
-    return uECC_compute_public_key(privkey, &pubkey[1], uECC_secp256r1());
+bool ffx_pk_computePublicKeyP256(uint8_t *pubkeyOut, uint8_t *privkey) {
+    pubkeyOut[0] = 0x04;
+    return uECC_compute_public_key(privkey, &pubkeyOut[1], uECC_secp256r1());
 }
 
-void ffx_pk_compressPubkeyP256(uint8_t *uncompressed, uint8_t *compressed) {
-    uECC_compress(&uncompressed[1], compressed, uECC_secp256r1());
+void ffx_pk_compressPubkeyP256(uint8_t *pubkeyOut, uint8_t *pubkey) {
+    if (pubkey[0] == 4) {
+        uECC_compress(&pubkey[1], pubkeyOut, uECC_secp256r1());
+    } else {
+        memmove(pubkeyOut, pubkey, 33);
+    }
 }
 
-void ffx_pk_decompressPubkeyP256(uint8_t *compPubkey, uint8_t *pubkey) {
-    uECC_decompress(compPubkey, pubkey, uECC_secp256r1());
+void ffx_pk_decompressPubkeyP256(uint8_t *pubkeyOut, uint8_t *pubkey) {
+    if (pubkey[0] == 4) {
+        memmove(pubkeyOut, pubkey, 65);
+    } else {
+        pubkeyOut[0] = 4;
+        uECC_decompress(pubkey, &pubkeyOut[1], uECC_secp256r1());
+    }
 }
 
-bool ffx_pk_computeSharedSecretP256(uint8_t *privkey,
-  uint8_t *otherPubkey, uint8_t *sharedSecret) {
-    return uECC_shared_secret(otherPubkey, privkey, sharedSecret,
+bool ffx_pk_computeSharedSecretP256(uint8_t *secretOut, uint8_t *privkey,
+  uint8_t *otherPubkey) {
+    // @TODO: convert compressed to uncompressed if necessary
+    return uECC_shared_secret(otherPubkey, privkey, secretOut,
       uECC_secp256r1());
+}
+
+void _ffx_pk_modAddSecp256k1(uint8_t *_result, uint8_t *_a, uint8_t *_b) {
+    uECC_Curve curve = uECC_secp256k1();
+
+    uECC_word_t result[uECC_MAX_WORDS] = { 0 };
+    uECC_word_t a[uECC_MAX_WORDS] = { 0 };
+    uECC_word_t b[uECC_MAX_WORDS] = { 0 };
+
+    uECC_vli_bytesToNative(a, _a, curve->num_bytes);
+    uECC_vli_bytesToNative(b, _b, curve->num_bytes);
+
+    uECC_vli_modAdd(result, a, b, curve->p, curve->num_words);
+
+    uECC_vli_nativeToBytes(_result, curve->num_bytes, result);
+}
+
+void _ffx_pk_addPointSecp256k1(uint8_t *_result, uint8_t *_a, uint8_t *_b) {
+    uECC_Curve curve = uECC_secp256k1();
+    // @TODO: Check that a[0] == 4 and b[0] == 4
+
+    uECC_word_t result[2 * uECC_MAX_WORDS] = { 0 };
+    uECC_word_t a[2 * uECC_MAX_WORDS] = { 0 };
+    uECC_word_t b[2 * uECC_MAX_WORDS] = { 0 };
+
+    uECC_vli_bytesToNative(a, &_a[1], curve->num_bytes);
+    uECC_vli_bytesToNative(&a[uECC_MAX_WORDS], &_a[33], curve->num_bytes);
+
+    uECC_vli_bytesToNative(b, &_b[1], curve->num_bytes);
+    uECC_vli_bytesToNative(&b[uECC_MAX_WORDS], &_b[33], curve->num_bytes);
+
+    EccPoint_add(result, a, b, curve);
+
+    _result[0] = 4;
+
+    uECC_vli_nativeToBytes(&_result[1], curve->num_bytes, result);
+    uECC_vli_nativeToBytes(&_result[33], curve->num_bytes, &result[uECC_MAX_WORDS]);
 }
 
 // </RicMoo>
