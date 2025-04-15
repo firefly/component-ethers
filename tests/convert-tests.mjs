@@ -102,6 +102,23 @@ function B(hex) {
 })();
 
 (async function() {
+    const tag = "hmac";
+
+    const tests = loadTests(tag);
+
+    const output = [ ];
+    for (const { name, data, key, algorithm, hmac } of tests) {
+        output.push({
+            name, data: B(data), key: B(key), hmac: B(hmac),
+            algorithm: ((algorithm === "sha256") ? 256: 512)
+        });
+    }
+
+    saveTests(tag, output, "cbor");
+    saveTests(tag, output, "h");
+})();
+
+(async function() {
     const tag = "mnemonics";
 
     const tests = loadTests(tag);

@@ -10,6 +10,7 @@
 
 #include "testcases-h/accounts.h"
 #include "testcases-h/hashes.h"
+#include "testcases-h/hmac.h"
 #include "testcases-h/mnemonics.h"
 #include "testcases-h/pbkdf.h"
 
@@ -253,7 +254,7 @@ int runTestMnemonics(const char* name, const char* phrase,
         printf("CBOR Error: status=%d test=" #NAME "\n", status); \
         countFail++; \
     } \
-    printf(#NAME ": pass=%zu fail=%zu skip%zu\n", countPass, countFail, countSkip); \
+    printf(#NAME ": pass=%zu fail=%zu skip=%zu\n", countPass, countFail, countSkip); \
     return countFail;
 
 
@@ -309,6 +310,42 @@ int test_hashes() {
     END_TESTS(hashes)
 }
 
+int test_hmac() {
+    START_TESTS(hmac)
+
+    OPEN_ARRAY()
+
+        READ_STRING(name, 128)
+
+        READ_DATA(data)
+        READ_DATA(key)
+        READ_DATA(hmac)
+        READ_VALUE(algorithm)
+
+        size_t length = algorithm / 8;
+
+        uint8_t digest[length];
+        memset(digest, 0, length);
+
+        if (algorithm == 256) {
+            ffx_hmac_sha256(digest, key, keyLength, data, dataLength);
+        } else {
+            ffx_hmac_sha512(digest, key, keyLength, data, dataLength);
+        }
+
+        int result = cmpbuf(digest, hmac, length);
+
+        if (result) {
+            printf("FAIL: %s\n", name);
+            countFail++;
+        } else {
+            countPass++;
+        }
+    CLOSE_ARRAY()
+
+    END_TESTS(hmac)
+}
+
 int test_mnemonics() {
     START_TESTS(mnemonics)
 
@@ -340,30 +377,60 @@ int test_mnemonics() {
                     READ_VALUE(depth)
                     READ_VALUE(index)
 
-                    FfxHDNode node = { 0 };
-                    if (!ffx_hdnode_initSeed(&node, seed)) {
-                        printf("bad seedd\n");
-                        break;
-                    }
-
                     READ_STRING(_path, 128)
 
-                    OPEN_AND_READ_ARRAY(path)
-                        uint64_t index = 0;
-                        status = ffx_cbor_getValue(&cursor, &index);
-                        if (status) { break; }
-                        ffx_hdnode_deriveChild(&node, index);
-                    CLOSE_ARRAY()
+                    // Derive child by path
+                    {
+                        FfxHDNode node = { 0 };
 
-                    int result = runTestMnemonicsNode(&node, chaincode,
-                      privkey, pubkey, depth, index);
+                        if (!ffx_hdnode_initSeed(&node, seed)) {
+                            printf("bad seed\n");
+                            break;
+                        }
 
-                    if (result) {
-                        printf("FAIL: %s (%s)\n", name, _path);
-                        countFail++;
+                        if (!ffx_hdnode_derivePath(&node, _path)) {
+                            printf("bad path\n");
+                            break;
+                        }
 
-                    } else {
-                        countPass++;
+                        int result = runTestMnemonicsNode(&node, chaincode,
+                          privkey, pubkey, depth, index);
+
+                        if (result) {
+                            printf("FAIL: %s (%s)\n", name, _path);
+                            countFail++;
+
+                        } else {
+                            countPass++;
+                        }
+                    }
+
+                    // Derive child incrementally by components
+                    {
+                        FfxHDNode node = { 0 };
+
+                        if (!ffx_hdnode_initSeed(&node, seed)) {
+                            printf("bad seedd\n");
+                            break;
+                        }
+
+                        OPEN_AND_READ_ARRAY(path)
+                            uint64_t index = 0;
+                            status = ffx_cbor_getValue(&cursor, &index);
+                            if (status) { break; }
+                            ffx_hdnode_deriveChild(&node, index);
+                        CLOSE_ARRAY()
+
+                        int result = runTestMnemonicsNode(&node, chaincode,
+                          privkey, pubkey, depth, index);
+
+                        if (result) {
+                            printf("FAIL: %s (%s)\n", name, _path);
+                            countFail++;
+
+                        } else {
+                            countPass++;
+                        }
                     }
                 CLOSE_ARRAY()
             }
@@ -418,63 +485,11 @@ int main() {
 
     countFail += test_accounts();
     countFail += test_hashes();
+    countFail += test_hmac();
     countFail += test_mnemonics();
     countFail += test_pbkdf();
-/*
 
-    FfxHDNode node = { 0 };
+    printf("Total: %zu failed\n", countFail);
 
-    uint8_t seed[] = { 11, 139, 217, 220, 95, 249, 13, 135, 198, 68, 130, 225, 29, 136, 171, 230, 5, 132, 33, 94, 28, 143, 70, 111, 81, 255, 171, 43, 75, 41, 193, 240, 237, 235, 21, 148, 41, 174, 213, 207, 156, 218, 173, 167, 124, 175, 61, 219, 76, 41, 140, 60, 54, 39, 64, 232, 188, 238, 100, 247, 90, 61, 116, 106 };
-    if (!ffx_hdnode_initSeed(&node, seed, 64)) {
-        printf("bad seedd\n");
-    }
-    printf("\n");
-
-    uint8_t pubkey[65];
-
-    dumpBuffer("Chaincode0: ", node.chaincode, 32);
-    dumpBuffer("Key0: ", node.key, 65);
-    if (!ffx_hdnode_getPubkey(&node, false, pubkey)) {
-        printf("failed getPubkey\n");
-    }
-    dumpBuffer("PubKey0: ", pubkey, 65);
-    if (!ffx_hdnode_getPubkey(&node, true, pubkey)) {
-        printf("failed getPubkey\n");
-    }
-    dumpBuffer("PubKey0-comp: ", pubkey, 33);
-    printf("\n");
-
-    if (!ffx_hdnode_deriveChild(&node, 0x1)) {
-        printf("failed derive\n");
-    }
-
-    dumpBuffer("Chaincode1: ", node.chaincode, 32);
-    dumpBuffer("Key1: ", node.key, 65);
-    if (!ffx_hdnode_getPubkey(&node, false, pubkey)) {
-        printf("failed getPubkey\n");
-    }
-    dumpBuffer("PubKey1: ", pubkey, 65);
-    if (!ffx_hdnode_getPubkey(&node, true, pubkey)) {
-        printf("failed getPubkey\n");
-    }
-    dumpBuffer("PubKey1-comp: ", pubkey, 33);
-    printf("\n");
-
-    if (!ffx_hdnode_deriveChild(&node, 0x1)) {
-        printf("failed derive\n");
-    }
-
-    dumpBuffer("Chaincode2: ", node.chaincode, 32);
-    dumpBuffer("Key2: ", node.key, 65);
-    if (!ffx_hdnode_getPubkey(&node, false, pubkey)) {
-        printf("failed getPubkey\n");
-    }
-    dumpBuffer("PubKey2: ", pubkey, 65);
-    if (!ffx_hdnode_getPubkey(&node, true, pubkey)) {
-        printf("failed getPubkey\n");
-    }
-    dumpBuffer("PubKey2-comp: ", pubkey, 33);
-    printf("\n");
-*/
     return countFail;
 }
