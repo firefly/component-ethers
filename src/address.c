@@ -4,7 +4,7 @@
 #include "firefly-hash.h"
 
 
-void ffx_address_checksumAddress(uint8_t *address, char *checksumed) {
+void ffx_eth_checksumAddress(char *checksumed, const uint8_t *address) {
 
     // Add the "0x" prefix and advance the pointer (so we can ignore it)
     checksumed[0] = '0';
@@ -37,7 +37,7 @@ void ffx_address_checksumAddress(uint8_t *address, char *checksumed) {
     }
 }
 
-void ffx_eth_computeAddress(uint8_t *pubkey, uint8_t *address) {
+void ffx_eth_computeAddress(uint8_t *address, const uint8_t *pubkey) {
     uint8_t hashed[32];
     ffx_hash_keccak256(hashed, &pubkey[1], 64);
 

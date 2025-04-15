@@ -20,9 +20,9 @@ extern "C" {
  *  %%checksumed%% must be at least E_ADDRESS_STRING_LENGTH
  *  bytes.
  */
-void ffx_eth_checksumAddress(uint8_t *address, char *checksumed);
+void ffx_eth_checksumAddress(char *checksumed, const uint8_t *address);
 
-void ffx_eth_computeAddress(uint8_t *pubkey, uint8_t *address);
+void ffx_eth_computeAddress(uint8_t *address, const uint8_t *pubkey);
 
 
 #ifdef __cplusplus
