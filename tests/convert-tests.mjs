@@ -133,3 +133,23 @@ function B(hex) {
     saveTests(tag, output, "cbor");
     saveTests(tag, output, "h");
 })();
+
+(async function() {
+    const tag = "pbkdf";
+
+    const tests = loadTests(tag);
+
+    const output = [ ];
+    for (const test of tests) {
+        output.push({
+            name: test.name, password: B(test.password),
+            salt: B(test.salt), dkLength: test.dkLen,
+            iterations: test.pbkdf2.iterations,
+            algorithm: ((test.pbkdf2.algorithm === "sha256") ? 256: 512),
+            key: B(test.pbkdf2.key)
+        });
+    }
+
+    saveTests(tag, output, "cbor");
+    saveTests(tag, output, "h");
+})();

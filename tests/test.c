@@ -11,6 +11,7 @@
 #include "testcases-h/accounts.h"
 #include "testcases-h/hashes.h"
 #include "testcases-h/mnemonics.h"
+#include "testcases-h/pbkdf.h"
 
 
 ///////////////////////////////
@@ -305,7 +306,7 @@ int test_hashes() {
         }
     CLOSE_ARRAY()
 
-    END_TESTS(accounts)
+    END_TESTS(hashes)
 }
 
 int test_mnemonics() {
@@ -372,6 +373,42 @@ int test_mnemonics() {
     END_TESTS(mnemonics)
 }
 
+int test_pbkdf() {
+    START_TESTS(pbkdf)
+
+    OPEN_ARRAY()
+
+        READ_STRING(name, 128)
+        READ_DATA(password)
+        READ_DATA(salt)
+        READ_DATA(key)
+        READ_VALUE(iterations)
+        READ_VALUE(dkLength)
+        READ_VALUE(algorithm)
+
+        uint8_t actKey[dkLength];
+        memset(actKey, 0, dkLength);
+        if (algorithm == 256) {
+            ffx_pbkdf2_sha256(actKey, dkLength, iterations, password,
+              passwordLength, salt, saltLength);
+        } else {
+            ffx_pbkdf2_sha512(actKey, dkLength, iterations, password,
+              passwordLength, salt, saltLength);
+        }
+
+        int result = cmpbuf(actKey, key, dkLength);
+
+        if (result) {
+            printf("FAIL: %s\n", name);
+            countFail++;
+        } else {
+            countPass++;
+        }
+    CLOSE_ARRAY()
+
+    END_TESTS(pbkdf)
+}
+
 
 ///////////////////////////////
 // Test Bootstrap
@@ -382,6 +419,7 @@ int main() {
     countFail += test_accounts();
     countFail += test_hashes();
     countFail += test_mnemonics();
+    countFail += test_pbkdf();
 /*
 
     FfxHDNode node = { 0 };
