@@ -65,7 +65,7 @@ typedef enum FfxCborStatus {
  *  This should not be modified directly! Only use the provided API.
  */
 typedef struct FfxCborCursor {
-    uint8_t *data;
+    const uint8_t *data;
     size_t length;
     size_t offset;
 
@@ -101,7 +101,7 @@ typedef struct FfxCborBuilder {
 //FfxCborStatus ffx_cbor_getBuildStatus(FfxCborBuilder *builder);
 //FfxCborStatus ffx_cbor_verify(uint8_t *data, size_t *length);
 
-void ffx_cbor_walk(FfxCborCursor *cursor, uint8_t *data, size_t length);
+void ffx_cbor_walk(FfxCborCursor *cursor, const uint8_t *data, size_t length);
 void ffx_cbor_clone(FfxCborCursor *dst, FfxCborCursor *src);
 
 /**
@@ -128,7 +128,7 @@ FfxCborStatus ffx_cbor_copyData(FfxCborCursor *cursor, uint8_t *data,
  *
  *  Do NOT modify these values.
  */
-FfxCborStatus ffx_cbor_getData(FfxCborCursor *cursor, uint8_t **data,
+FfxCborStatus ffx_cbor_getData(FfxCborCursor *cursor, const uint8_t **data,
   size_t *length);
 
 /**

@@ -51,7 +51,7 @@ static FfxTxStatus append(FfxRlpBuilder *rlp, Format format, FfxCborCursor *tx,
     }
 
     size_t length = 0;
-    uint8_t *data = NULL;
+    const uint8_t *data = NULL;
     status = ffx_cbor_getData(&value, &data, &length);
     if (status) { return FfxTxStatusBadData; }
 

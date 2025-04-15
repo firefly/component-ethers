@@ -76,7 +76,7 @@ static FfxRlpStatus appendByte(FfxRlpBuilder *rlp, uint8_t byte) {
     return FfxRlpStatusOK;
 }
 
-static FfxRlpStatus appendBytes(FfxRlpBuilder *rlp, uint8_t *data, size_t length) {
+static FfxRlpStatus appendBytes(FfxRlpBuilder *rlp, const uint8_t *data, size_t length) {
     size_t remaining = rlp->length - rlp->offset;
     if (remaining < length) { return FfxRlpStatusBufferOverrun; }
     memmove(&rlp->data[rlp->offset], data, length);
@@ -122,7 +122,7 @@ void ffx_rlp_build(FfxRlpBuilder *rlp, uint8_t *data, size_t length) {
     rlp->length = length;
 }
 
-FfxRlpStatus ffx_rlp_appendData(FfxRlpBuilder *rlp, uint8_t *data, size_t length) {
+FfxRlpStatus ffx_rlp_appendData(FfxRlpBuilder *rlp, const uint8_t *data, size_t length) {
     if (length == 1 && data[0] <= 127) {
         return appendByte(rlp, data[0]);
     }

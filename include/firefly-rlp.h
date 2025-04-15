@@ -59,7 +59,7 @@ size_t ffx_rlp_getBuildLength(FfxRlpBuilder *builder);
 /**
  *  Append a Data.
  */
-FfxRlpStatus ffx_rlp_appendData(FfxRlpBuilder *builder, uint8_t *data,
+FfxRlpStatus ffx_rlp_appendData(FfxRlpBuilder *builder, const uint8_t *data,
   size_t length);
 
 /**

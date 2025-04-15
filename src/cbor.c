@@ -36,7 +36,7 @@ static FfxCborType _getType(uint8_t header) {
     return FfxCborTypeError;
 }
 
-static uint8_t* _getBytes(FfxCborCursor *cursor, FfxCborType *type,
+static const uint8_t* _getBytes(FfxCborCursor *cursor, FfxCborType *type,
   uint64_t *value, size_t *safe, size_t *headerSize, FfxCborStatus *status) {
 
     *headerSize = 0;
@@ -52,7 +52,7 @@ static uint8_t* _getBytes(FfxCborCursor *cursor, FfxCborType *type,
     *safe = length - offset - 1;
     *status = FfxCborStatusOK;
 
-    uint8_t *data = &cursor->data[cursor->offset];
+    const uint8_t *data = &cursor->data[cursor->offset];
 
     uint8_t header = *data++;
     *headerSize = 1;
@@ -113,7 +113,7 @@ static uint8_t* _getBytes(FfxCborCursor *cursor, FfxCborType *type,
 ///////////////////////////////
 // Crawler
 
-void ffx_cbor_walk(FfxCborCursor *cursor, uint8_t *data, size_t length) {
+void ffx_cbor_walk(FfxCborCursor *cursor, const uint8_t *data, size_t length) {
     cursor->data = data;
     cursor->length = length;
     cursor->offset = 0;
@@ -138,7 +138,7 @@ FfxCborStatus ffx_cbor_getValue(FfxCborCursor *cursor, uint64_t *value) {
     FfxCborType type = 0;
     size_t safe = 0, headLen = 0;
     FfxCborStatus status = FfxCborStatusOK;
-    uint8_t *data = _getBytes(cursor, &type, value, &safe, &headLen, &status);
+    const uint8_t *data = _getBytes(cursor, &type, value, &safe, &headLen, &status);
     if (data == NULL) { return status; }
 
     switch (type) {
@@ -156,15 +156,15 @@ FfxCborStatus ffx_cbor_getValue(FfxCborCursor *cursor, uint64_t *value) {
 
 // @TODO: refactor these 3 functions
 
-FfxCborStatus ffx_cbor_getData(FfxCborCursor *cursor, uint8_t **outData, size_t *length) {
-    *outData = NULL;
-    *length = 0;
+FfxCborStatus ffx_cbor_getData(FfxCborCursor *cursor, const uint8_t **outData, size_t *length) {
+    if (outData) { *outData = NULL; }
+    if (length) { *length = 0; }
 
     FfxCborType type = 0;
     uint64_t value;
     size_t safe = 0, headLen = 0;
     FfxCborStatus status = FfxCborStatusOK;
-    uint8_t *data = _getBytes(cursor, &type, &value, &safe, &headLen, &status);
+    const uint8_t *data = _getBytes(cursor, &type, &value, &safe, &headLen, &status);
     if (data == NULL) { return status; }
 
     if (type != FfxCborTypeData && type != FfxCborTypeString) {
@@ -177,8 +177,8 @@ FfxCborStatus ffx_cbor_getData(FfxCborCursor *cursor, uint8_t **outData, size_t 
     // Only support lengths up to 16 bits
     if (value > 0xffffffff) { return FfxCborStatusOverflow; }
 
-    *outData = data;
-    *length = value;
+    if (outData) { *outData = data; }
+    if (length) { *length = value; }
 
     return FfxCborStatusOK;
 }
@@ -188,7 +188,7 @@ FfxCborStatus ffx_cbor_copyData(FfxCborCursor *cursor, uint8_t *output, size_t l
     uint64_t value;
     size_t safe = 0, headLen = 0;
     FfxCborStatus status = FfxCborStatusOK;
-    uint8_t *data = _getBytes(cursor, &type, &value, &safe, &headLen, &status);
+    const uint8_t *data = _getBytes(cursor, &type, &value, &safe, &headLen, &status);
     if (data == NULL) { return status; }
 
     if (type != FfxCborTypeData && type != FfxCborTypeString) {
@@ -220,7 +220,7 @@ FfxCborStatus ffx_cbor_getLength(FfxCborCursor *cursor, size_t *count) {
     uint64_t value;
     size_t safe = 0, headLen = 0;;
     FfxCborStatus status = FfxCborStatusOK;
-    uint8_t *data = _getBytes(cursor, &type, &value, &safe, &headLen, &status);
+    const uint8_t *data = _getBytes(cursor, &type, &value, &safe, &headLen, &status);
     if (data == NULL) {
         *count = 0;
         return status;
@@ -252,7 +252,7 @@ FfxCborStatus _ffx_cbor_next(FfxCborCursor *cursor) {
     uint64_t value;
     size_t safe = 0, headLen = 0;
     FfxCborStatus status = FfxCborStatusOK;
-    uint8_t *data = _getBytes(cursor, &type, &value, &safe, &headLen, &status);
+    const uint8_t *data = _getBytes(cursor, &type, &value, &safe, &headLen, &status);
     if (data == NULL) { return status; }
 
     switch (type) {
@@ -281,7 +281,7 @@ FfxCborStatus ffx_cbor_firstValue(FfxCborCursor *cursor, FfxCborCursor *key) {
     uint64_t value;
     size_t safe = 0, headLen = 0;
     FfxCborStatus status = FfxCborStatusOK;
-    uint8_t *data = _getBytes(cursor, &type, &value, &safe, &headLen, &status);
+    const uint8_t *data = _getBytes(cursor, &type, &value, &safe, &headLen, &status);
     if (data == NULL) { return status; }
 
     if (value == 0) { return FfxCborStatusNotFound; }
