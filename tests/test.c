@@ -12,7 +12,11 @@
 #include "testcases-h/hashes.h"
 #include "testcases-h/mnemonics.h"
 
-void dumpBuffer(const char *header, const uint8_t *buffer, size_t length) {
+
+///////////////////////////////
+// Utilities
+
+static void dumpBuffer(const char *header, const uint8_t *buffer, size_t length) {
     printf("%s 0x", header);
     for (int i = 0; i < length; i++) {
         printf("%02x", buffer[i]);
@@ -20,7 +24,14 @@ void dumpBuffer(const char *header, const uint8_t *buffer, size_t length) {
     printf(" (length=%zu)\n", length);
 }
 
-int cmpbuf(const uint8_t *a, const uint8_t *b, size_t length) {
+static int onlyAscii(const char *text) {
+    for (int i = strlen(text) - 1; i >= 0; i--) {
+        if (text[i] < 32 || text[i] > 126) { return false; }
+    }
+    return true;
+}
+
+static int cmpbuf(const uint8_t *a, const uint8_t *b, size_t length) {
     for (int i = 0; i < length; i++) {
         int d = a[i] - b[i];
         if (d) { return d; }
@@ -29,6 +40,9 @@ int cmpbuf(const uint8_t *a, const uint8_t *b, size_t length) {
     return 0;
 }
 
+
+///////////////////////////////
+// Testcase Check Functions
 
 int runTestAccounts(const char* name, const uint8_t *privkey,
   const char* address) {
@@ -68,13 +82,6 @@ int runTestHashes(const char* name, const uint8_t *data, size_t dataLength,
     if (cmpbuf(digest, keccak256, 32)) { return 1; }
 
     return 0;
-}
-
-int onlyAscii(const char *text) {
-    for (int i = strlen(text) - 1; i >= 0; i--) {
-        if (text[i] < 32 || text[i] > 126) { return false; }
-    }
-    return true;
 }
 
 int runTestMnemonicsNode(FfxHDNode *node, const uint8_t *chaincode,
@@ -173,37 +180,93 @@ int runTestMnemonics(const char* name, const char* phrase,
 }
 
 
+///////////////////////////////
+// Test Data Macros
+
+#define READ_STRING(NAME,MAXSIZE) \
+    char (NAME)[MAXSIZE] = { 0 }; \
+    { \
+        FfxCborCursor test; \
+        ffx_cbor_clone(&test, &cursor); \
+        status = ffx_cbor_followKey(&test, #NAME); \
+        if (status) { printf("BAD FOLLOW STRING: " #NAME "\n"); break; } \
+        status = ffx_cbor_copyData(&test, (uint8_t*)(NAME), MAXSIZE); \
+        if (status) { printf("BAD COPY: " #NAME "\n"); break; } \
+    }
+
+
+#define READ_DATA(NAME) \
+    const uint8_t *NAME = NULL; \
+    size_t NAME##Length = 0; \
+    { \
+        FfxCborCursor test; \
+        ffx_cbor_clone(&test, &cursor); \
+        status = ffx_cbor_followKey(&test, #NAME); \
+        if (status) { printf("BAD FOLLOW DATA: " #NAME "\n"); break; } \
+        status = ffx_cbor_getData(&test, &NAME, &NAME##Length); \
+        if (status) { printf("BAD GET DATA: " #NAME "\n"); break; } \
+    }
+
+#define READ_VALUE(NAME) \
+    uint64_t NAME = 0;  \
+    { \
+        FfxCborCursor test; \
+        ffx_cbor_clone(&test, &cursor); \
+        status = ffx_cbor_followKey(&test, #NAME); \
+        if (status) { printf("BAD FOLLOW VALUE: " #NAME "\n"); break; } \
+        status = ffx_cbor_getValue(&test, &NAME); \
+        if (status) { printf("BAD GET VALUE: " #NAME "\n"); break; } \
+    }
+
+
+#define OPEN_ARRAY() \
+    { \
+        FfxCborCursor store; \
+        ffx_cbor_clone(&store, &cursor); \
+        status = ffx_cbor_firstValue(&cursor, NULL); \
+        while (!status) {
+
+#define CLOSE_ARRAY() \
+            status = ffx_cbor_nextValue(&cursor, NULL); \
+        } \
+        ffx_cbor_clone(&cursor, &store); \
+    }
+
+#define OPEN_AND_READ_ARRAY(NAME) \
+    { \
+        FfxCborCursor store; \
+        ffx_cbor_clone(&store, &cursor); \
+        status = ffx_cbor_followKey(&cursor, #NAME); \
+        if (status) { printf("BAD FOLLOW ARRAY\n"); break; } \
+        status = ffx_cbor_firstValue(&cursor, NULL); \
+        while (!status) {
+
+#define START_TESTS(NAME) \
+    FfxCborCursor cursor; \
+    ffx_cbor_walk(&cursor, tests_##NAME, sizeof(tests_##NAME)); \
+    FfxCborStatus status = FfxCborStatusOK; \
+    size_t countPass = 0, countFail = 0, countSkip = 0;
+
+#define END_TESTS(NAME) \
+    if (status != FfxCborStatusOK && status != FfxCborStatusNotFound) { \
+        printf("CBOR Error: status=%d test=" #NAME "\n", status); \
+        countFail++; \
+    } \
+    printf(#NAME ": pass=%zu fail=%zu skip%zu\n", countPass, countFail, countSkip); \
+    return countFail;
+
+
+///////////////////////////////
+// Test Suites
+
 int test_accounts() {
-    FfxCborCursor cursor;
-    ffx_cbor_walk(&cursor, tests_accounts, sizeof(tests_accounts));
+    START_TESTS(accounts)
 
-    size_t countPass = 0, countFail = 0;
+    OPEN_ARRAY()
 
-    FfxCborStatus status = ffx_cbor_firstValue(&cursor, NULL);
-    while (!status) {
-        FfxCborCursor test;
-
-        char name[128] = { 0 };
-        const uint8_t *privkey = NULL;
-        char address[128] = { 0 };
-
-        ffx_cbor_clone(&test, &cursor);
-        status = ffx_cbor_followKey(&test, "name");
-        if (status) { break; }
-        status = ffx_cbor_copyData(&test, (uint8_t*)name, sizeof(name));
-        if (status) { break; }
-
-        ffx_cbor_clone(&test, &cursor);
-        status = ffx_cbor_followKey(&test, "privkey");
-        if (status) { break; }
-        status = ffx_cbor_getData(&test, &privkey, NULL);
-        if (status) { break; }
-
-        ffx_cbor_clone(&test, &cursor);
-        status = ffx_cbor_followKey(&test, "address");
-        if (status) { break; }
-        status = ffx_cbor_copyData(&test, (uint8_t*)address, sizeof(address));
-        if (status) { break; }
+        READ_STRING(name, 128)
+        READ_DATA(privkey)
+        READ_STRING(address, 128)
 
         int result = runTestAccounts(name, privkey, address);
 
@@ -213,66 +276,26 @@ int test_accounts() {
         } else {
             countPass++;
         }
+    CLOSE_ARRAY()
 
-        status = ffx_cbor_nextValue(&cursor, NULL);
-    }
-
-    if (status != FfxCborStatusOK && status != FfxCborStatusNotFound) {
-        printf("CBOR Error: status=%d\n", status);
-        countFail++;
-    }
-
-    printf("Accounts: pass=%zu fail=%zu\n", countPass, countFail);
-
-    return countFail;
+    END_TESTS(accounts)
 }
 
+
 int test_hashes() {
-    FfxCborCursor cursor;
-    ffx_cbor_walk(&cursor, tests_hashes, sizeof(tests_hashes));
+    START_TESTS(hashes)
 
-    size_t countPass = 0, countFail = 0;
+    OPEN_ARRAY()
 
-    FfxCborStatus status = ffx_cbor_firstValue(&cursor, NULL);
-    while (!status) {
-        FfxCborCursor test;
+        READ_STRING(name, 128)
 
-        char name[128] = { 0 };
-        const uint8_t *data = NULL, *sha256 = NULL, *sha512 = NULL, *keccak256 = NULL;
-        size_t dataLen = 0, sha256Len = 0, sha512Len = 0, keccak256Len = 0;
+        READ_DATA(data)
+        READ_DATA(sha256)
+        READ_DATA(sha512)
+        READ_DATA(keccak256)
 
-        ffx_cbor_clone(&test, &cursor);
-        status = ffx_cbor_followKey(&test, "name");
-        if (status) { break; }
-        status = ffx_cbor_copyData(&test, (uint8_t*)name, sizeof(name));
-        if (status) { break; }
-
-        ffx_cbor_clone(&test, &cursor);
-        status = ffx_cbor_followKey(&test, "data");
-        if (status) { break; }
-        status =ffx_cbor_getData(&test, &data, &dataLen);
-        if (status) { break; }
-
-        ffx_cbor_clone(&test, &cursor);
-        status = ffx_cbor_followKey(&test, "sha256");
-        if (status) { break; }
-        status = ffx_cbor_getData(&test, &sha256, &sha256Len);
-        if (status) { break; }
-
-        ffx_cbor_clone(&test, &cursor);
-        status = ffx_cbor_followKey(&test, "sha512");
-        if (status) { break; }
-        status = ffx_cbor_getData(&test, &sha512, &sha512Len);
-        if (status) { break; }
-
-        ffx_cbor_clone(&test, &cursor);
-        status = ffx_cbor_followKey(&test, "keccak256");
-        if (status) { break; }
-        status = ffx_cbor_getData(&test, &keccak256, &keccak256Len);
-        if (status) { break; }
-
-        int result = runTestHashes(name, data, dataLen, sha256, sha256Len,
-          sha512, sha512Len, keccak256, keccak256Len);
+        int result = runTestHashes(name, data, dataLength, sha256,
+          sha256Length, sha512, sha512Length, keccak256, keccak256Length);
 
         if (result) {
             printf("FAIL: %s\n", name);
@@ -280,72 +303,27 @@ int test_hashes() {
         } else {
             countPass++;
         }
+    CLOSE_ARRAY()
 
-        status = ffx_cbor_nextValue(&cursor, NULL);
-    }
-
-    if (status != FfxCborStatusOK && status != FfxCborStatusNotFound) {
-        printf("CBOR Error: status=%d\n", status);
-        countFail++;
-    }
-
-    printf("Hashes: pass=%zu fail=%zu\n", countPass, countFail);
-
-    return countFail;
+    END_TESTS(accounts)
 }
 
 int test_mnemonics() {
-    FfxCborCursor cursor;
-    ffx_cbor_walk(&cursor, tests_mnemonics, sizeof(tests_mnemonics));
+    START_TESTS(mnemonics)
 
-    size_t countPass = 0, countFail = 0, countSkip = 0;
-
-    FfxCborStatus status = ffx_cbor_firstValue(&cursor, NULL);
-    while (!status) {
-        FfxCborCursor test;
-
-        char name[128] = { 0 };
-        char phrase[512] = { 0 };
-        char password[256] = { 0 };
-        const uint8_t *entropy = NULL, *seed = NULL;
-        size_t passwordLen = 0, entropyLen = 0, seedLen = 0;
-
-        ffx_cbor_clone(&test, &cursor);
-        status = ffx_cbor_followKey(&test, "name");
-        if (status) { break; }
-        status = ffx_cbor_copyData(&test, (uint8_t*)name, sizeof(name));
-        if (status) { break; }
-
-        ffx_cbor_clone(&test, &cursor);
-        status = ffx_cbor_followKey(&test, "phrase");
-        if (status) { break; }
-        status = ffx_cbor_copyData(&test, (uint8_t*)phrase, sizeof(phrase));
-        if (status) { break; }
-
-        ffx_cbor_clone(&test, &cursor);
-        status = ffx_cbor_followKey(&test, "password");
-        if (status) { break; }
-        status = ffx_cbor_copyData(&test, (uint8_t*)password, sizeof(password));
-        if (status) { break; }
-
-        ffx_cbor_clone(&test, &cursor);
-        status = ffx_cbor_followKey(&test, "entropy");
-        if (status) { break; }
-        status = ffx_cbor_getData(&test, &entropy, &entropyLen);
-        if (status) { break; }
-
-        ffx_cbor_clone(&test, &cursor);
-        status = ffx_cbor_followKey(&test, "seed");
-        if (status) { break; }
-        status = ffx_cbor_getData(&test, &seed, &seedLen);
-        if (status) { break; }
+    OPEN_ARRAY()
+        READ_STRING(name, 128)
+        READ_STRING(phrase, 512)
+        READ_STRING(password, 256)
+        READ_DATA(entropy)
+        READ_DATA(seed)
 
         if (!onlyAscii(phrase) || !onlyAscii(password)) {
             countSkip++;
 
         } else {
-            int result = runTestMnemonics(name, phrase, password, passwordLen,
-              entropy, entropyLen, seed, seedLen);
+            int result = runTestMnemonics(name, phrase, password,
+            strlen(password), entropy, entropyLength, seed, seedLength);
 
             if (result) {
                 printf("FAIL: %s\n", name);
@@ -354,48 +332,12 @@ int test_mnemonics() {
             } else {
                 countPass++;
 
-                ffx_cbor_clone(&test, &cursor);
-                status = ffx_cbor_followKey(&test, "nodes");
-                if (status) { break; }
-
-
-                status = ffx_cbor_firstValue(&test, NULL);
-                while (!status) {
-                    FfxCborCursor nodeTest;
-
-                    char path[64] = { 0 };
-                    const uint8_t *chaincode = NULL, *pubkey = NULL, *privkey = NULL;
-                    uint64_t depth = 0, index = 0;
-
-                    ffx_cbor_clone(&nodeTest, &test);
-                    status = ffx_cbor_followKey(&nodeTest, "chaincode");
-                    if (status) { break; }
-                    status = ffx_cbor_getData(&nodeTest, &chaincode, NULL);
-                    if (status) { break; }
-
-                    ffx_cbor_clone(&nodeTest, &test);
-                    status = ffx_cbor_followKey(&nodeTest, "pubkey");
-                    if (status) { break; }
-                    status = ffx_cbor_getData(&nodeTest, &pubkey, NULL);
-                    if (status) { break; }
-
-                    ffx_cbor_clone(&nodeTest, &test);
-                    status = ffx_cbor_followKey(&nodeTest, "privkey");
-                    if (status) { break; }
-                    status = ffx_cbor_getData(&nodeTest, &privkey, NULL);
-                    if (status) { break; }
-
-                    ffx_cbor_clone(&nodeTest, &test);
-                    status = ffx_cbor_followKey(&nodeTest, "depth");
-                    if (status) { break; }
-                    status = ffx_cbor_getValue(&nodeTest, &depth);
-                    if (status) { break; }
-
-                    ffx_cbor_clone(&nodeTest, &test);
-                    status = ffx_cbor_followKey(&nodeTest, "index");
-                    if (status) { break; }
-                    status = ffx_cbor_getValue(&nodeTest, &index);
-                    if (status) { break; }
+                OPEN_AND_READ_ARRAY(nodes)
+                    READ_DATA(chaincode)
+                    READ_DATA(pubkey)
+                    READ_DATA(privkey)
+                    READ_VALUE(depth)
+                    READ_VALUE(index)
 
                     FfxHDNode node = { 0 };
                     if (!ffx_hdnode_initSeed(&node, seed)) {
@@ -403,57 +345,36 @@ int test_mnemonics() {
                         break;
                     }
 
-                    ffx_cbor_clone(&nodeTest, &test);
-                    status = ffx_cbor_followKey(&nodeTest, "_path");
-                    if (status) { break; }
-                    status = ffx_cbor_copyData(&nodeTest, (uint8_t*)path, sizeof(path));
-                    if (status) { break; }
+                    READ_STRING(_path, 128)
 
-                    ffx_cbor_clone(&nodeTest, &test);
-                    status = ffx_cbor_followKey(&nodeTest, "path");
-                    if (status) { break; }
-
-                    status = ffx_cbor_firstValue(&nodeTest, NULL);
-                    while (!status) {
+                    OPEN_AND_READ_ARRAY(path)
                         uint64_t index = 0;
-
-                        status = ffx_cbor_getValue(&nodeTest, &index);
+                        status = ffx_cbor_getValue(&cursor, &index);
                         if (status) { break; }
-
                         ffx_hdnode_deriveChild(&node, index);
-
-                        status = ffx_cbor_nextValue(&nodeTest, NULL);
-                    }
+                    CLOSE_ARRAY()
 
                     int result = runTestMnemonicsNode(&node, chaincode,
                       privkey, pubkey, depth, index);
 
                     if (result) {
-                        printf("FAIL: %s (%s)\n", name, path);
+                        printf("FAIL: %s (%s)\n", name, _path);
                         countFail++;
 
                     } else {
                         countPass++;
                     }
-
-                    status = ffx_cbor_nextValue(&test, NULL);
-                }
+                CLOSE_ARRAY()
             }
         }
+    CLOSE_ARRAY()
 
-        status = ffx_cbor_nextValue(&cursor, NULL);
-    }
-
-    if (status != FfxCborStatusOK && status != FfxCborStatusNotFound) {
-        printf("CBOR Error: status=%d\n", status);
-        countFail++;
-    }
-
-    printf("Mnemonics: pass=%zu fail=%zu skip=%zu\n", countPass, countFail,
-      countSkip);
-
-    return countFail;
+    END_TESTS(mnemonics)
 }
+
+
+///////////////////////////////
+// Test Bootstrap
 
 int main() {
     size_t countFail = 0;
