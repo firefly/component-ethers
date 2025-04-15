@@ -8,11 +8,12 @@
 
 // DEBUG
 #include <stdio.h>
+void dumpBuffer(const char*, uint8_t*, size_t);
 
 #define WORDLIST            wordlist_en
 
 // "Bitcoin seed"
-const uint8_t MasterSecret[] = {  66, 105, 116, 99, 111, 105, 110, 32, 115, 101, 101, 100 };
+const uint8_t MasterSecret[] = { 66, 105, 116, 99, 111, 105, 110, 32, 115, 101, 101, 100 };
 
 
 static bool nextWord(FfxWordlistCursor *cursor) {
@@ -118,7 +119,7 @@ bool ffx_mnemonic_initPhrase(FfxMnemonic *mnemonic, const char* phrase) {
     return true;
 }
 
-bool ffx_mnemonic_initEntropy(FfxMnemonic *mnemonic, uint8_t* entropy,
+bool ffx_mnemonic_initEntropy(FfxMnemonic *mnemonic, const uint8_t* entropy,
   size_t length) {
     memset(mnemonic, 0, sizeof(FfxMnemonic));
 
@@ -155,32 +156,56 @@ const char* ffx_mnemonic_getWord(FfxMnemonic *mnemonic, int index) {
     return ffx_bip39_word(wordIndex);
 }
 
-//bool ffx_mnemonic_getSeed(FfxMnemonic *mnemonic, const char* password,
-//  uint8_t *seed) {
 
-//    FfxHmacSha512Context context = { 0 };
-//    ffx_hmac_init(&context, MasterSecret, );
-//}
+static const char saltPrefix[] = "mnemonic";
+
+bool ffx_mnemonic_getSeed(FfxMnemonic *mnemonic, const char* password,
+  uint8_t *seed) {
+    for (int i = strlen(password) - 1; i >= 0; i--) {
+        if (password[i] < 32 || password[i] > 126) {
+            printf("Unsupported password: '%s' (%lu bytes)\n", password,
+              strlen(password));
+            return false;
+        }
+    }
+
+    char phrase[9 * mnemonic->wordCount];
+    memset(phrase, 0, sizeof(phrase));
+
+    size_t offset = 0;
+    for (int i = 0; i < mnemonic->wordCount; i++) {
+        if (i > 0) { phrase[offset++] = ' '; }
+        const char *word = ffx_mnemonic_getWord(mnemonic, i);
+        size_t wordLength = strlen(word);
+        strcpy(&phrase[offset], word);
+        offset += wordLength;
+    }
+
+    char salt[strlen(saltPrefix) + strlen(password) + 1];
+    memset(salt, 0, sizeof(salt));
+    strcpy(salt, saltPrefix);
+    strcpy(&salt[strlen(saltPrefix)], password);
+
+    ffx_pbkdf2_sha512(seed, FFX_BIP39_SEED_LENGTH, 2048,
+      (const uint8_t*)phrase, offset, (const uint8_t*)salt, strlen(salt));
+
+    return 1;
+}
 
 ///////////////////////////////
 //
 
 
-bool ffx_hdnode_initSeed(FfxHDNode *node, uint8_t *seed, size_t length) {
-    if (length < 16 || length > 64) { return false; }
-
+bool ffx_hdnode_initSeed(FfxHDNode *node, const uint8_t *seed) {
     memset(node, 0, sizeof(FfxHDNode));
 
     uint8_t I[64] = { 0 };
-    ffx_hmac_sha512(I, MasterSecret, sizeof(MasterSecret), seed, length);
-
-    printf("Key: key=");
-    for (int i = 0; i < 64; i++) { printf("%02x", I[i]); }
-    printf("\n");
+    ffx_hmac_sha512(I, MasterSecret, sizeof(MasterSecret), seed,
+      FFX_BIP39_SEED_LENGTH);
 
     // Check the private key is good (use the node->key temporarily)
-    bool status = ffx_pk_computePubkeySecp256k1(node->key, I);
-    printf("STATUS: %d\n", status);
+    uint8_t check[65];
+    bool status = ffx_pk_computePubkeySecp256k1(check, I);
     if (!status) { return false; }
 
     memset(node->key, 0, 65);
@@ -194,12 +219,16 @@ void ffx_hdnode_clone(FfxHDNode *dst, FfxHDNode *src) {
     memmove(dst, src, sizeof(FfxHDNode));
 }
 
+// See: ecc.c
 void _ffx_pk_modAddSecp256k1(uint8_t *_result, uint8_t *_a, uint8_t *_b);
 void _ffx_pk_addPointSecp256k1(uint8_t *_result, uint8_t *_a, uint8_t *_b);
 
 bool ffx_hdnode_deriveChild(FfxHDNode *node, uint32_t index) {
     if (node->depth == 0xffffffff) { return false; }
 
+    // Used to:
+    //  - temporality build up the serI data (37 bytes)
+    //  - then hold the hashed value (64 bytes)
     uint8_t I[64] = { 0 };
 
     if (node->key[0] == 0) {
@@ -207,7 +236,7 @@ bool ffx_hdnode_deriveChild(FfxHDNode *node, uint32_t index) {
 
         if (index & FfxHDNodeHardened) {
             // Data = 0x00 || ser_256(k_par)
-            memcpy(I, node->key, 32);
+            memcpy(I, node->key, 33);
 
         } else {
             // Data = ser_p(point(k_par))
@@ -230,10 +259,10 @@ bool ffx_hdnode_deriveChild(FfxHDNode *node, uint32_t index) {
 
     ffx_hmac_sha512(I, node->chaincode, 32, I, 37);
 
-    uint8_t pubkey[65];
+    uint8_t pubkey[65] = { 0 };
     if (node->key[0] == 0) {
         // (IL + k_par) % n
-        uint8_t key[32];
+        uint8_t key[32] = { 0 };
         _ffx_pk_modAddSecp256k1(key, I, &node->key[1]);
         if(!ffx_pk_computePubkeySecp256k1(pubkey, key)) { return false; }
         memcpy(&node->key[1], key, sizeof(key));
@@ -252,7 +281,7 @@ bool ffx_hdnode_deriveChild(FfxHDNode *node, uint32_t index) {
 
 bool ffx_hdnode_neuter(FfxHDNode *node) {
     if (node->key[0] != 0) { return true; }
-    return ffx_pk_computePubkeySecp256k1(&node->key[1], node->key);
+    return ffx_pk_computePubkeySecp256k1(node->key, &node->key[1]);
 }
 
 bool ffx_hdnode_getPrivkey(FfxHDNode *node, uint8_t *privkey) {
@@ -264,14 +293,14 @@ bool ffx_hdnode_getPrivkey(FfxHDNode *node, uint8_t *privkey) {
 bool ffx_hdnode_getPubkey(FfxHDNode *node, bool compressed, uint8_t *pubkey) {
     if (node->key[0] == 0) {
         if (!compressed) {
-            return ffx_pk_computePubkeySecp256k1(&node->key[1], pubkey);
+            return ffx_pk_computePubkeySecp256k1(pubkey, &node->key[1]);
         }
 
         uint8_t pub[65];
-        bool status = ffx_pk_computePubkeySecp256k1(&node->key[1], pub);
+        bool status = ffx_pk_computePubkeySecp256k1(pub, &node->key[1]);
         if (!status) { return false; }
 
-        ffx_pk_compressPubkeySecp256k1(pub, pubkey);
+        ffx_pk_compressPubkeySecp256k1(pubkey, pub);
         return true;
     }
 
@@ -282,7 +311,7 @@ bool ffx_hdnode_getPubkey(FfxHDNode *node, bool compressed, uint8_t *pubkey) {
         return true;
     }
 
-    ffx_pk_compressPubkeySecp256k1(node->key, pubkey);
+    ffx_pk_compressPubkeySecp256k1(pubkey, node->key);
     return true;
 }
 

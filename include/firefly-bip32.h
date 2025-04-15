@@ -33,20 +33,25 @@ const char* ffx_bipd39_nextWord(FfxWordlistCursor *cursor, int *index);
 ///////////////////////////////
 // Mnemonic
 
-#define FFX_BIP39_SEED_LENGTH           (32)
+
+#define FFX_BIP39_SEED_LENGTH           (64)
+
 
 typedef struct FfxMnemonic {
     size_t wordCount;
     size_t entropyLength;
-    uint8_t entropy[33]; // Incudes checksum
+    uint8_t entropy[33]; // Incudes checksum (but entropyLength does not)
 } FfxMnemonic;
 
 
 bool ffx_mnemonic_initPhrase(FfxMnemonic *mnemonic, const char* phrase);
-bool ffx_mnemonic_initEntropy(FfxMnemonic *mnemonic, uint8_t* entropy,
+bool ffx_mnemonic_initEntropy(FfxMnemonic *mnemonic, const uint8_t* entropy,
   size_t length);
 
 const char* ffx_mnemonic_getWord(FfxMnemonic *mnemonic, int index);
+
+//size_t ffx_mnemonic_getPhraseLength(FfxMnemonic *mnemonic);
+//char* ffx_mnemonic_getPhrase(FfxMnemonic *mnemonic, char* phraseOut, size_t *length);
 
 bool ffx_mnemonic_getSeed(FfxMnemonic *mnemonic, const char* password,
   uint8_t *seed);
@@ -67,11 +72,7 @@ typedef struct FfxHDNode {
     uint32_t index;
 } FfxHDNode;
 
-
-//bool ffx_hdnode_initMnemonic(FfxHDNode *node, FfxMnemonic *mnemonic);
-//bool ffx_hdnode_initPhrase(FfxHDNode *node, const char* phrase);
-//bool ffx_hdnode_initEntropy(FfxHDNode *node, uint8_t *data, size_t length);
-bool ffx_hdnode_initSeed(FfxHDNode *node, uint8_t *seed, size_t length);
+bool ffx_hdnode_initSeed(FfxHDNode *node, const uint8_t *seed);
 
 void ffx_hdnode_clone(FfxHDNode *dst, FfxHDNode *src);
 

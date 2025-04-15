@@ -1411,18 +1411,15 @@ static bool uECC_compute_public_key(const uint8_t *private_key, uint8_t *public_
 
     /* Make sure the private key is in the range [1, n-1]. */
     if (uECC_vli_isZero(_private, BITS_TO_WORDS(curve->num_n_bits))) {
-printf("foo1\n");
         return ECC_ERROR;
     }
 
     if (uECC_vli_cmp(curve->n, _private, BITS_TO_WORDS(curve->num_n_bits)) != 1) {
-printf("foo2\n");
         return ECC_ERROR;
     }
 
     /* Compute public key. */
     if (!EccPoint_compute_public_key(_public, _private, curve)) {
-printf("foo3\n");
         return ECC_ERROR;
     }
 
@@ -1430,7 +1427,6 @@ printf("foo3\n");
     uECC_vli_nativeToBytes(
         public_key + curve->num_bytes, curve->num_bytes, _public + curve->num_words);
 
-printf("foo5\n");
     return ECC_SUCCESS;
 }
 
@@ -1867,7 +1863,8 @@ static void finish_SHA256(const uECC_HashContext *base, uint8_t *hash_result) {
     ffx_hash_finalSha256(&context->ctx, hash_result);
 }
 
-bool ffx_pk_signSecp256k1(uint8_t *sigOut, uint8_t *privkey, uint8_t *digest) {
+bool ffx_pk_signSecp256k1(uint8_t *sigOut, const uint8_t *privkey,
+  const uint8_t *digest) {
 
     uint8_t tmp[32 + 32 + 64];
 // @TODO: This dones't need to be nested structs...
@@ -1889,12 +1886,12 @@ bool ffx_pk_signSecp256k1(uint8_t *sigOut, uint8_t *privkey, uint8_t *digest) {
 //int32_t secp256k1_verify(uint8_t *digest, uint8_t *signature, uint8_t *publicKey) {
 //}
 
-bool ffx_pk_computePubkeySecp256k1(uint8_t *pubkeyOut, uint8_t *privkey) {
+bool ffx_pk_computePubkeySecp256k1(uint8_t *pubkeyOut, const uint8_t *privkey) {
     pubkeyOut[0] = 0x04;
     return uECC_compute_public_key(privkey, &pubkeyOut[1], uECC_secp256k1());
 }
 
-void ffx_pk_compressPubkeySecp256k1(uint8_t *pubkeyOut, uint8_t *pubkey) {
+void ffx_pk_compressPubkeySecp256k1(uint8_t *pubkeyOut, const uint8_t *pubkey) {
     if (pubkey[0] == 4) {
         uECC_compress(&pubkey[1], pubkeyOut, uECC_secp256k1());
     } else {
@@ -1902,7 +1899,7 @@ void ffx_pk_compressPubkeySecp256k1(uint8_t *pubkeyOut, uint8_t *pubkey) {
     }
 }
 
-void ffx_pk_decompressPubkeySecp256k1(uint8_t *pubkeyOut, uint8_t *pubkey) {
+void ffx_pk_decompressPubkeySecp256k1(uint8_t *pubkeyOut, const uint8_t *pubkey) {
     if (pubkey[0] == 4) {
         memmove(pubkeyOut, pubkey, 65);
     } else {
@@ -1911,15 +1908,16 @@ void ffx_pk_decompressPubkeySecp256k1(uint8_t *pubkeyOut, uint8_t *pubkey) {
     }
 }
 
-bool ffx_pk_computeSharedSecretSecp256k1(uint8_t *secretOut, uint8_t *privkey,
-  uint8_t *otherPubkey) {
+bool ffx_pk_computeSharedSecretSecp256k1(uint8_t *secretOut,
+  const uint8_t *privkey, const uint8_t *otherPubkey) {
     // @TODO: convert compressed to uncompressed if necessary
     return uECC_shared_secret(otherPubkey, privkey, secretOut,
       uECC_secp256k1());
 }
 
 
-bool ffx_pk_signP256(uint8_t *sigOut, uint8_t *privkey, uint8_t *digest) {
+bool ffx_pk_signP256(uint8_t *sigOut, const uint8_t *privkey,
+  const uint8_t *digest) {
 
     uint8_t tmp[32 + 32 + 64];
 // @TODO: This dones't need to be nested structs...
@@ -1938,12 +1936,12 @@ bool ffx_pk_signP256(uint8_t *sigOut, uint8_t *privkey, uint8_t *digest) {
       uECC_secp256r1());
 }
 
-bool ffx_pk_computePublicKeyP256(uint8_t *pubkeyOut, uint8_t *privkey) {
+bool ffx_pk_computePublicKeyP256(uint8_t *pubkeyOut, const uint8_t *privkey) {
     pubkeyOut[0] = 0x04;
     return uECC_compute_public_key(privkey, &pubkeyOut[1], uECC_secp256r1());
 }
 
-void ffx_pk_compressPubkeyP256(uint8_t *pubkeyOut, uint8_t *pubkey) {
+void ffx_pk_compressPubkeyP256(uint8_t *pubkeyOut, const uint8_t *pubkey) {
     if (pubkey[0] == 4) {
         uECC_compress(&pubkey[1], pubkeyOut, uECC_secp256r1());
     } else {
@@ -1951,7 +1949,7 @@ void ffx_pk_compressPubkeyP256(uint8_t *pubkeyOut, uint8_t *pubkey) {
     }
 }
 
-void ffx_pk_decompressPubkeyP256(uint8_t *pubkeyOut, uint8_t *pubkey) {
+void ffx_pk_decompressPubkeyP256(uint8_t *pubkeyOut, const uint8_t *pubkey) {
     if (pubkey[0] == 4) {
         memmove(pubkeyOut, pubkey, 65);
     } else {
@@ -1960,8 +1958,8 @@ void ffx_pk_decompressPubkeyP256(uint8_t *pubkeyOut, uint8_t *pubkey) {
     }
 }
 
-bool ffx_pk_computeSharedSecretP256(uint8_t *secretOut, uint8_t *privkey,
-  uint8_t *otherPubkey) {
+bool ffx_pk_computeSharedSecretP256(uint8_t *secretOut, const uint8_t *privkey,
+  const uint8_t *otherPubkey) {
     // @TODO: convert compressed to uncompressed if necessary
     return uECC_shared_secret(otherPubkey, privkey, secretOut,
       uECC_secp256r1());
@@ -1977,7 +1975,7 @@ void _ffx_pk_modAddSecp256k1(uint8_t *_result, uint8_t *_a, uint8_t *_b) {
     uECC_vli_bytesToNative(a, _a, curve->num_bytes);
     uECC_vli_bytesToNative(b, _b, curve->num_bytes);
 
-    uECC_vli_modAdd(result, a, b, curve->p, curve->num_words);
+    uECC_vli_modAdd(result, a, b, curve->n, curve->num_words);
 
     uECC_vli_nativeToBytes(_result, curve->num_bytes, result);
 }

@@ -9,6 +9,7 @@ idf_component_register(
     "src/hmac.c"
     "src/keccak.c"
     "src/rlp.c"
+    "src/pbkdf2.c"
     "src/sha2.c"
     "src/tx.c"
 

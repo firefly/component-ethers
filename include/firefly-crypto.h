@@ -23,32 +23,35 @@ extern "C" {
 #define FFX_SHARED_SECRET_LENGTH              (32)
 
 
-bool ffx_pk_signSecp256k1(uint8_t *sigOut, uint8_t *privkey, uint8_t *digest);
+bool ffx_pk_signSecp256k1(uint8_t *sigOut, const uint8_t *privkey,
+  const uint8_t *digest);
 
-bool ffx_pk_recoverPubkeySecp256k1(uint8_t *pubkeyOut, uint8_t *digest,
-  uint8_t *sig);
+bool ffx_pk_recoverPubkeySecp256k1(uint8_t *pubkeyOut, const uint8_t *digest,
+  const uint8_t *sig);
 
-bool ffx_pk_computePubkeySecp256k1(uint8_t *pubkeyOut, uint8_t *privkey);
+bool ffx_pk_computePubkeySecp256k1(uint8_t *pubkeyOut, const uint8_t *privkey);
 
 // @TODO: Test these!!
-void ffx_pk_compressPubkeySecp256k1(uint8_t *pubkeyOut, uint8_t *pubkey);
-void ffx_pk_decompressPubkeySecp256k1(uint8_t *pubkeyOut, uint8_t *pubkey);
+void ffx_pk_compressPubkeySecp256k1(uint8_t *pubkeyOut, const uint8_t *pubkey);
+void ffx_pk_decompressPubkeySecp256k1(uint8_t *pubkeyOut, const uint8_t *pubkey);
 
-bool ffx_pk_computeSharedSecretSecp256k1(uint8_t *secretOut, uint8_t *privkey,
-  uint8_t *otherPubkey);
+bool ffx_pk_computeSharedSecretSecp256k1(uint8_t *secretOut,
+  const uint8_t *privkey, const uint8_t *otherPubkey);
 
 
-bool ffx_pk_signP256(uint8_t *sigOut, uint8_t *privkey, uint8_t *digest);
+bool ffx_pk_signP256(uint8_t *sigOut, const uint8_t *privkey,
+  const uint8_t *digest);
 
-bool ecc_recoverPubkeyP256(uint8_t *pubkeyOut, uint8_t *digest, uint8_t *sig);
+bool ecc_recoverPubkeyP256(uint8_t *pubkeyOut, const uint8_t *digest,
+  const uint8_t *sig);
 
-bool ffx_pk_computePubkeyP256(uint8_t *pubkeyOut, uint8_t privkey);
+bool ffx_pk_computePubkeyP256(uint8_t *pubkeyOut, const uint8_t *privkey);
 
-void ffx_pk_compressPubkeyP256(uint8_t *pubkeyOut, uint8_t *pubkey);
-void ffx_pk_decompressPubkeyP256(uint8_t *pubkeyOut, uint8_t *pubkey);
+void ffx_pk_compressPubkeyP256(uint8_t *pubkeyOut, const uint8_t *pubkey);
+void ffx_pk_decompressPubkeyP256(uint8_t *pubkeyOut, const uint8_t *pubkey);
 
-bool ffx_pk_computeSharedSecretP256(uint8_t *secretOut, uint8_t *privkey,
-  uint8_t *otherPubkey);
+bool ffx_pk_computeSharedSecretP256(uint8_t *secretOut, const uint8_t *privkey,
+  const uint8_t *otherPubkey);
 
 
 

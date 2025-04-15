@@ -101,6 +101,16 @@ void ffx_hmac_sha512(uint8_t *digest, const uint8_t *key, size_t keyLen,
   const uint8_t *data, size_t dataLen);
 
 
+
+void ffx_pbkdf2_sha256(uint8_t *dkOut, size_t dkLength, uint32_t iterations,
+  const uint8_t *passwd, size_t passwdLength,
+  const uint8_t *salt, size_t saltLength);
+
+void ffx_pbkdf2_sha512(uint8_t *dkOut, size_t dkLength, uint32_t iterations,
+  const uint8_t *passwd, size_t passwdLength,
+  const uint8_t *salt, size_t saltLength);
+
+
 #ifdef __cplusplus
 }
 #endif  /* __cplusplus */

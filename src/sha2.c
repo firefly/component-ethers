@@ -254,6 +254,11 @@ static void sha256_transf(FfxSha256Context *ctx, const uint8_t *message,
     }
 }
 
+void _ffx_hash_xformSha256(FfxSha256Context *ctx, const uint8_t *message) {
+    sha256_transf(ctx, message, 1);
+}
+
+
 void ffx_hash_sha256(uint8_t *digest, const uint8_t *message, size_t len)
 {
     FfxSha256Context ctx;
@@ -377,6 +382,10 @@ static void sha512_transf(FfxSha512Context *ctx, const uint8_t *message,
             ctx->h[j] += wv[j];
         }
     }
+}
+
+void _ffx_hash_xformSha512(FfxSha512Context *ctx, const uint8_t *message) {
+    sha512_transf(ctx, message, 1);
 }
 
 void ffx_hash_sha512(uint8_t *digest, const uint8_t *message, size_t len)
