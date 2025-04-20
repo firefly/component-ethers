@@ -9,7 +9,6 @@ extern "C" {
 #include <stddef.h>
 #include <stdint.h>
 
-
 /**
  *  A tag can be used to modify the length of an array or map when
  *  its length is unknown (or may change) after it has been appended.
@@ -21,20 +20,21 @@ typedef uint16_t FfxCborBuilderTag;
  */
 typedef enum FfxCborType {
     FfxCborTypeError    = 0,
-    FfxCborTypeNull     = 1,
-    FfxCborTypeBoolean  = 2,
-    FfxCborTypeNumber   = 3,
-    FfxCborTypeString   = 4,
-    FfxCborTypeData     = 5,
-    FfxCborTypeArray    = 6,
-    FfxCborTypeMap      = 7
+    FfxCborTypeNull     = (1 << 1),
+    FfxCborTypeBoolean  = (1 << 2),
+    FfxCborTypeNumber   = (1 << 3),
+    FfxCborTypeString   = (1 << 4),
+    FfxCborTypeData     = (1 << 5),
+    FfxCborTypeArray    = (1 << 6),
+    FfxCborTypeMap      = (1 << 7)
 } FfxCborType;
 
 typedef enum FfxCborStatus {
-   // Returned at the end of a map or array during iteration or
-   // when attempting to follow a map with a non-existant key or
-   // array past its index.
-   FfxCborStatusNotFound          = 5,
+   // Indicates to a call to ffx_cbor_iterate that the iterator should
+   // initialize.
+   //
+   // This value is never returned in an outvar.
+   FfxCborStatusBeginIterator     = 20,
 
    // No error
    FfxCborStatusOK                = 0,
@@ -50,6 +50,9 @@ typedef enum FfxCborStatus {
 
    // Some data was discarded during a getData
    FfxCborStatusTruncated         = -32,
+
+   // 
+   FfxCborStatusBadData           = -33,
 
    // The CBOR data contains an unsupported value type(e.g. tags)
    FfxCborStatusUnsupportedType   = -52,
@@ -77,10 +80,12 @@ typedef struct FfxCborCursor {
 
     // The index within the container of the cursor.
     size_t containerIndex;
-
-//    FfxCborStatus status;
 } FfxCborCursor;
 
+typedef struct FfxCborData {
+    const uint8_t *bytes;
+    size_t length;
+} FfxCborData;
 
 /**
  *  A builder used to create and write CBOR-encoded data.
@@ -96,31 +101,61 @@ typedef struct FfxCborBuilder {
 } FfxCborBuilder;
 
 
-// Detects if an error occurred during crawl or build... @TODO
-//FfxCborStatus ffx_cbor_getWalkStatus(FfxCborCursor *cursor);
-//FfxCborStatus ffx_cbor_getBuildStatus(FfxCborBuilder *builder);
+// @TODO:
 //FfxCborStatus ffx_cbor_verify(uint8_t *data, size_t *length);
 
 void ffx_cbor_walk(FfxCborCursor *cursor, const uint8_t *data, size_t length);
 void ffx_cbor_clone(FfxCborCursor *dst, FfxCborCursor *src);
 
 /**
+ *
+ *  Components
+ *    - [0-9]+ => array index
+ *    - [a-z_][a-z0-9-_] => map key
+ *    - $ => next character is literal and a map key
+ *    - :(number|string|boolean|null|data|array|map) => type must match
+ *    - (<|<=|=|=>|>)[0-9]+ => array constraint; length must match
+ *
+ *  Path Examples:
+ *    - "foo/bar/:number" => { foo: { bar: 34 } }
+ *    - "foo:map/bar>3/2/:boolean" => { foo: [0, 1, true, 3 ] }
+ *    - "$:test/#12=2/:number" => { foo: }
+ */
+//FfxCborStatus ffx_cbor_queryData(FfxCborCursor *cursor, const char *path,
+//  uint8_t *data, size_t *length);
+
+//FfxCborStatus ffx_cbor_queryValue(FfxCborCursor *cursor, const char *path,
+//  uint64_t *value);
+
+//FfxCborStatus ffx_cbor_query(FfxCborCursor *cursor, const char *path,
+//  FfxCborCursor *cursorOut);
+
+/**
  *  Returns the type.
  */
 FfxCborType ffx_cbor_getType(FfxCborCursor *cursor);
+
+bool ffx_cbor_checkType(FfxCborCursor *cursor, FfxCborType types);
 
 /**
  *  Returns the value for scalar types (Null, Boolean, Number).
  *
  *  Null is always 0. Boolean is either 0 for false, or 1 for true.
  */
-FfxCborStatus ffx_cbor_getValue(FfxCborCursor *cursor, uint64_t *value);
+uint64_t ffx_cbor_getValue(FfxCborCursor *cursor, FfxCborStatus *error);
+
+/**
+ *  Returns the value for scalar types (Null, Boolean, Number).
+ *
+ *  Null is always 0. Boolean is either 0 for false, or 1 for true.
+ */
+uint32_t ffx_cbor_getValueU32(FfxCborCursor *cursor, FfxCborStatus *error);
 
 /**
  *  Copies the data for data types (Data and String), up to length bytes.
  */
-FfxCborStatus ffx_cbor_copyData(FfxCborCursor *cursor, uint8_t *data,
-  size_t length);
+//size_t ffx_cbor_copyData(FfxCborCursor *cursor, uint8_t *data,
+//  size_t length, FfxCborStatus *error);
 
 /**
  *  Exposes the underlying shared data buffer and length for data
@@ -128,28 +163,35 @@ FfxCborStatus ffx_cbor_copyData(FfxCborCursor *cursor, uint8_t *data,
  *
  *  Do NOT modify these values.
  */
-FfxCborStatus ffx_cbor_getData(FfxCborCursor *cursor, const uint8_t **data,
-  size_t *length);
+FfxCborData ffx_cbor_getData(FfxCborCursor *cursor, FfxCborStatus *error);
 
 /**
  *  For Array and Map types, returns the number of values, and for
  *  Data and String types returns the length in bytes.
  */
-FfxCborStatus ffx_cbor_getLength(FfxCborCursor *cursor, size_t *count);
+size_t ffx_cbor_getLength(FfxCborCursor *cursor, FfxCborStatus *error);
+
+bool ffx_cbor_checkLength(FfxCborCursor *cursor, size_t length);
 
 /**
  *  Moves the %%cursor%% to the value for %%key%% within a Map.
  *
  *  If the Map does not have %%key%%, returns CborStatusNotFound.
  */
-FfxCborStatus ffx_cbor_followKey(FfxCborCursor *cursor, const char *key);
+bool ffx_cbor_followKey(FfxCborCursor *cursor, const char *key,
+  FfxCborStatus *error);
 
 /**
  *  Moves the %%cursor%% to the %%index%% value within an Array.
  *
  *  If outside the bounds of the Array, returns CborStatusNotFound.
  */
-FfxCborStatus ffx_cbor_followIndex(FfxCborCursor *cursor, size_t index);
+bool ffx_cbor_followIndex(FfxCborCursor *cursor, size_t index,
+  FfxCborStatus *error);
+
+bool ffx_cbor_iterate(FfxCborCursor *cursor, FfxCborCursor *key,
+  FfxCborStatus *error);
+
 
 bool ffx_cbor_isDone(FfxCborCursor *cursor);
 
@@ -161,7 +203,8 @@ bool ffx_cbor_isDone(FfxCborCursor *cursor);
  *
  *  If the continaer is empty, returns CborStatusNotFound.
  */
-FfxCborStatus ffx_cbor_firstValue(FfxCborCursor *cursor, FfxCborCursor *key);
+//bool ffx_cbor_firstValue(FfxCborCursor *cursor, FfxCborCursor *key,
+//  FfxCborStatus *error);
 
 /**
  *  Moves %%cursor%% to the next value within a Map or Array.
@@ -171,10 +214,11 @@ FfxCborStatus ffx_cbor_firstValue(FfxCborCursor *cursor, FfxCborCursor *key);
  *
  *  If there are no more entries, returns CborStatusNotFound.
  */
-FfxCborStatus ffx_cbor_nextValue(FfxCborCursor *cursor, FfxCborCursor *key);
+//bool ffx_cbor_nextValue(FfxCborCursor *cursor, FfxCborCursor *key,
+//  FfxCborStatus *error);
 
 // Low-level; not for normal use
-FfxCborStatus _ffx_cbor_next(FfxCborCursor *cursor);
+bool _ffx_cbor_next(FfxCborCursor *cursor, FfxCborStatus *error);
 //uint8_t* cbor_raw(CborCursor *cursor, uint8_t *type, uint64_t *count);
 
 /**
