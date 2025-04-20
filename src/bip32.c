@@ -279,9 +279,69 @@ bool ffx_hdnode_deriveChild(FfxHDNode *node, uint32_t index) {
     return true;
 }
 
+bool ffx_hdnode_derivePath(FfxHDNode *_node, const char* path) {
+    FfxHDNode node;
+    ffx_hdnode_clone(&node, _node);
+
+    size_t length = strlen(path) + 1;
+    uint32_t index = 0, count = 0;
+    for (int i = 0; i < length; i++) {
+        char c = path[i];
+
+        if (c == '/' || c == '\0') {
+            // Did not contain any actual numbers in the component
+            if (count == 0) { return false; }
+
+            ffx_hdnode_deriveChild(&node, index);
+
+            // Reset
+            count = 0;
+            index = 0;
+
+        } else if (c >= '0' && c <= '9') {
+            // Would go out of range
+            if (index > 214748364) { return false; }
+
+            // Cannot include numbers after a tick
+            if (index & 0x80000000) { return false; }
+
+            count++;
+            index *= 10;
+            index += (c - '0');
+
+        } else if (c == '\'') {
+            // Cannot include a tick after a tick
+            if (index & 0x80000000) { return false; }
+
+            index |= 0x80000000;
+
+        } else if (c == 'm') {
+            // Must be the first component and on a root node
+            if (i != 0 || node.depth != 0) { return false; }
+
+            // If contains components, m must stand alone
+            if (length > 2 && path[1] != '/') { return false; }
+
+            // m/XXX; skip m/
+            i++;
+
+        } else {
+            // Invalid character
+            return false;
+        }
+    }
+
+    ffx_hdnode_clone(_node, &node);
+    return true;
+}
+
 bool ffx_hdnode_neuter(FfxHDNode *node) {
     if (node->key[0] != 0) { return true; }
     return ffx_pk_computePubkeySecp256k1(node->key, &node->key[1]);
+}
+
+bool ffx_hdnode_isNeuter(FfxHDNode *node) {
+    return (node->key[0] != 0);
 }
 
 bool ffx_hdnode_getPrivkey(FfxHDNode *node, uint8_t *privkey) {

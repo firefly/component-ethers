@@ -77,13 +77,17 @@ bool ffx_hdnode_initSeed(FfxHDNode *node, const uint8_t *seed);
 void ffx_hdnode_clone(FfxHDNode *dst, FfxHDNode *src);
 
 bool ffx_hdnode_deriveChild(FfxHDNode *node, uint32_t index);
+bool ffx_hdnode_derivePath(FfxHDNode *node, const char* path);
+
 bool ffx_hdnode_neuter(FfxHDNode *node);
+bool ffx_hdnode_isNeuter(FfxHDNode *node);
 
 bool ffx_hdnode_getPrivkey(FfxHDNode *node, uint8_t *privkey);
 bool ffx_hdnode_getPubkey(FfxHDNode *node, bool compressed, uint8_t *pubkey);
 
 //#define FFX_HDNODE_EXTENDED_KEY_MAX_LENGTH
-//bool ffx-hdnode_getExtendedKey(FfxHDNode *node, char *extendedKey);
+//bool ffx_hdnode_getExtendedKey(FfxHDNode *node, char *extendedKey);
+//bool ffx_hdnode_initExtendedKey(FfxHDNode *node, char *extendedKey);
 
 
 #ifdef __cplusplus
