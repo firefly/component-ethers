@@ -5,6 +5,7 @@
 extern "C" {
 #endif /* __cplusplus */
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -31,8 +32,11 @@ typedef enum FfxRlpStatus {
 typedef struct FfxRlpBuilder {
     uint8_t *data;
     size_t offset, length;
+
+    FfxRlpStatus status;
 } FfxRlpBuilder;
 
+typedef size_t FfxRlpBuilderTag;
 
 /**
  *  Initializes a new RLP builder.
@@ -59,20 +63,24 @@ size_t ffx_rlp_getBuildLength(FfxRlpBuilder *builder);
 /**
  *  Append a Data.
  */
-FfxRlpStatus ffx_rlp_appendData(FfxRlpBuilder *builder, const uint8_t *data,
+bool ffx_rlp_appendData(FfxRlpBuilder *builder, const uint8_t *data,
   size_t length);
 
 /**
  *  Append a Data, with the contents of the a NULL-terminated string.
  */
-FfxRlpStatus ffx_rlp_appendString(FfxRlpBuilder *builder, const char *data);
+bool ffx_rlp_appendString(FfxRlpBuilder *builder, const char *data);
 
 /**
  *  Append an Array, where the next %%count%% Items added will be
  *  added to this array.
  */
-FfxRlpStatus ffx_rlp_appendArray(FfxRlpBuilder *builder, size_t count);
+bool ffx_rlp_appendArray(FfxRlpBuilder *builder, size_t count);
 
+FfxRlpBuilderTag ffx_rlp_appendMutableArray(FfxRlpBuilder *builder);
+
+bool ffx_rlp_adjustCount(FfxRlpBuilder *builder, FfxRlpBuilderTag tag,
+  size_t count);
 
 // @TODO: Future API?
 //typedef uint16_t RlpBuilderTag;

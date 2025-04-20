@@ -41,6 +41,8 @@
 
 #include "firefly-rlp.h"
 
+// DEBUG
+#include <stdio.h>
 
 #define TAG_ARRAY         (0xc0)
 #define TAG_DATA          (0x80)
@@ -69,25 +71,40 @@ static size_t getByteCount(size_t value) {
     return 4;
 }
 
-static FfxRlpStatus appendByte(FfxRlpBuilder *rlp, uint8_t byte) {
-    size_t remaining = rlp->length - rlp->offset;
-    if (remaining < 1) { return FfxRlpStatusBufferOverrun; }
+static bool appendByte(FfxRlpBuilder *rlp, uint8_t byte) {
+
+    if (rlp->status) { return false; }
+
+    if (rlp->length < rlp->offset + 1) {
+        rlp->status = FfxRlpStatusBufferOverrun;
+        return false;
+    }
+
     rlp->data[rlp->offset++] = byte;
-    return FfxRlpStatusOK;
+    return true;
 }
 
-static FfxRlpStatus appendBytes(FfxRlpBuilder *rlp, const uint8_t *data, size_t length) {
-    size_t remaining = rlp->length - rlp->offset;
-    if (remaining < length) { return FfxRlpStatusBufferOverrun; }
+static bool appendBytes(FfxRlpBuilder *rlp, const uint8_t *data,
+  size_t length) {
+
+    if (rlp->status) { return false; }
+
+    if (rlp->length < rlp->offset + length) {
+        rlp->status = FfxRlpStatusBufferOverrun;
+        return false;
+    }
+
     memmove(&rlp->data[rlp->offset], data, length);
     rlp->offset += length;
-    return FfxRlpStatusOK;
+    return true;
 }
 
 // The TAG_RESERVE indicates we are leaving space in the Array. It
 // currently has the number of items in the array, which will need
 // to be swapped out for number of bytes in the final RLP.
-static FfxRlpStatus appendHeader(FfxRlpBuilder *rlp, uint8_t tag, size_t length) {
+static bool appendHeader(FfxRlpBuilder *rlp, uint8_t tag, size_t length) {
+
+    if (rlp->status) { return false; }
 
     if (tag != TAG_RESERVE && length <= 55) {
         return appendByte(rlp, tag + length);
@@ -101,15 +118,13 @@ static FfxRlpStatus appendHeader(FfxRlpBuilder *rlp, uint8_t tag, size_t length)
         byteCount = getByteCount(length);
     }
 
-    FfxRlpStatus status = appendByte(rlp, tag + 55 + byteCount);
-    if (status) { return status; }
+    if (!appendByte(rlp, tag + 55 + byteCount)) { return false; }
 
     for (int i = byteCount - 1; i >= 0; i--) {
-        FfxRlpStatus status = appendByte(rlp, length >> (8 * i));
-        if (status) { return status; }
+        if (!appendByte(rlp, (length >> (8 * i)))) { return false; }
     }
 
-    return FfxRlpStatusOK;
+    return true;
 }
 
 
@@ -120,28 +135,51 @@ void ffx_rlp_build(FfxRlpBuilder *rlp, uint8_t *data, size_t length) {
     rlp->data = data;
     rlp->offset = 0;
     rlp->length = length;
+    rlp->status = FfxRlpStatusOK;
 }
 
-FfxRlpStatus ffx_rlp_appendData(FfxRlpBuilder *rlp, const uint8_t *data, size_t length) {
+bool ffx_rlp_appendData(FfxRlpBuilder *rlp, const uint8_t *data,
+  size_t length) {
+
+    if (rlp->status) { return false; }
+
     if (length == 1 && data[0] <= 127) {
         return appendByte(rlp, data[0]);
     }
 
-    FfxRlpStatus status = appendHeader(rlp, TAG_DATA, length);
-    if (status) { return status; }
+    if (!appendHeader(rlp, TAG_DATA, length)) { return false; }
 
     return appendBytes(rlp, data, length);
 }
 
-FfxRlpStatus ffx_rlp_appendString(FfxRlpBuilder *rlp, const char *data) {
+bool ffx_rlp_appendString(FfxRlpBuilder *rlp, const char *data) {
     return ffx_rlp_appendData(rlp, (uint8_t*)data, strlen(data));
 }
 
-FfxRlpStatus ffx_rlp_appendArray(FfxRlpBuilder *rlp, size_t count) {
+bool ffx_rlp_appendArray(FfxRlpBuilder *rlp, size_t count) {
     // Zero-length arrays can be stored directly in their compact
     // representation. Otherwise we reserve 4 bytes where we include
     // the length in items to fix in finalize
     return appendHeader(rlp, count ? TAG_RESERVE: TAG_ARRAY, count);
+}
+
+FfxRlpBuilderTag ffx_rlp_appendMutableArray(FfxRlpBuilder *rlp) {
+
+    size_t tag = rlp->offset;
+    if (!appendHeader(rlp, TAG_RESERVE, 0)) { return 0; }
+    return tag;
+}
+
+bool ffx_rlp_adjustCount(FfxRlpBuilder *rlp, FfxRlpBuilderTag tag,
+  size_t count) {
+    if (tag == 0 || rlp->status) { return false; }
+
+    size_t offset = rlp->offset;
+    rlp->offset = tag;
+    bool status = appendHeader(rlp, TAG_RESERVE, count);
+    rlp->offset = offset;
+
+    return status;
 }
 
 static size_t readValue(uint8_t *data, size_t count) {
@@ -177,19 +215,17 @@ static size_t finalize(FfxRlpBuilder *rlp) {
 
     size_t count = readValue(&rlp->data[rlp->offset + 1], 4);
     rlp->offset = dataOffset;
-
     size_t length = 0;
     for (int i = 0; i < count; i++) {
         size_t l = finalize(rlp);
-        if (l == 0) { return FfxRlpStatusOverflow; }
-        rlp->offset += l;
+        if (l == 0) { return 0; }
         length += l;
+        rlp->offset = dataOffset + length;
     }
 
     // Overwrite the 5-byte header with its compact form
     rlp->offset = baseOffset;
-    FfxRlpStatus status = appendHeader(rlp, TAG_ARRAY, length);
-    if (status) { return 0; }
+    if (!appendHeader(rlp, TAG_ARRAY, length)) { return 0; }
 
     // Compact the children, shifting the data left.
     if (rlp->offset != dataOffset) {
@@ -202,6 +238,8 @@ static size_t finalize(FfxRlpBuilder *rlp) {
 }
 
 size_t ffx_rlp_finalize(FfxRlpBuilder *rlp) {
+    if (rlp->status) { return 0; }
+
     // Store the non-compact length to minimize compaction memmoves
     rlp->length = rlp->offset;
 
