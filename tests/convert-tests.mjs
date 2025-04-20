@@ -21,13 +21,14 @@ function zpad(_v, width) {
 }
 
 function saveTests(tag, tests, format) {
+    const cbor = encode(tests);
+
     if (format === "cbor") {
         const filename = resolve("testcases-cbor/", tag + ".cbor");
-        console.log("Writing:", tag + ".cbor");
-        writeFileSync(filename, encode(tests));
-    } else if (format === "h") {
-        const cbor = encode(tests);
+        console.log(`Writing: ${ tag }.cbor (${ cbor.length } bytes)`);
+        writeFileSync(filename, cbor);
 
+    } else if (format === "h") {
         const output = [ ];
 
         output.push(`#ifndef __TEST_${ tag.toUpperCase() }_H__`);
@@ -59,13 +60,29 @@ function saveTests(tag, tests, format) {
         output.push(`#endif /* __TEST_${ tag.toUpperCase() }_H__ */`);
 
         const filename = resolve("testcases-h/", tag + ".h");
-        console.log("Writing:", tag + ".h");
+        console.log(`Writing: ${ tag }.h (${ cbor.length } bytes)`);
         writeFileSync(filename, output.join("\n"));
     }
 }
 
 function B(hex) {
     return new Uint8Array(Buffer.from(hex.substring(2), "hex"));
+}
+
+const BN_256 = BigInt(256);
+function BN(value) {
+    value = BigInt(value);
+
+    const bytes = [ ];
+    while (value) {
+        bytes.unshift(Number(value % BN_256));
+        value /= BN_256;
+    }
+    return new Uint8Array(bytes);
+}
+
+function BS(sig) {
+    return new Uint8Array(0);
 }
 
 (async function() {
@@ -80,7 +97,7 @@ function B(hex) {
         });
     }
 
-    saveTests(tag, output, "cbor");
+    //saveTests(tag, output, "cbor");
     saveTests(tag, output, "h");
 })();
 
@@ -97,7 +114,7 @@ function B(hex) {
         });
     }
 
-    saveTests(tag, output, "cbor");
+    //saveTests(tag, output, "cbor");
     saveTests(tag, output, "h");
 })();
 
@@ -114,7 +131,7 @@ function B(hex) {
         });
     }
 
-    saveTests(tag, output, "cbor");
+    //saveTests(tag, output, "cbor");
     saveTests(tag, output, "h");
 })();
 
@@ -147,7 +164,7 @@ function B(hex) {
         });
     }
 
-    saveTests(tag, output, "cbor");
+    //saveTests(tag, output, "cbor");
     saveTests(tag, output, "h");
 })();
 
@@ -167,6 +184,45 @@ function B(hex) {
         });
     }
 
-    saveTests(tag, output, "cbor");
+    //saveTests(tag, output, "cbor");
+    saveTests(tag, output, "h");
+})();
+
+(async function() {
+    const tag = "transactions";
+
+    const tests = loadTests(tag);
+
+    const output = [ ];
+    for (const { name, transaction, privateKey, signedLondon,
+      signatureLondon, unsignedLondon } of tests) {
+
+//        if ((transaction.accessList || []).length) { // @TODO: include
+//            continue;
+//        }
+
+        output.push({
+            name, privkey: B(privateKey), sig: BS(signatureLondon),
+            rlpUnsigned: B(unsignedLondon), rlpSigned: B(signedLondon),
+            tx: {
+                type: 2,
+                chainId: BN(transaction.chainId || 0),
+                to: B(transaction.to || "0x"),
+                nonce: BN(transaction.nonce || 0),
+                gasLimit: BN(transaction.gasLimit || 0),
+                maxFeePerGas: BN(transaction.maxFeePerGas || 0),
+                maxPriorityFeePerGas: BN(transaction.maxPriorityFeePerGas || 0),
+                data: B(transaction.data || "0x"),
+                value: BN(transaction.value || 0),
+                accessList: (transaction.accessList || []).map((a) => {
+                    return [
+                        B(a.address), a.storageKeys.map(B)
+                    ];
+                })
+            }
+        });
+    }
+
+//    saveTests(tag, output, "cbor");
     saveTests(tag, output, "h");
 })();
