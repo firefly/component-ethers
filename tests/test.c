@@ -1,4 +1,3 @@
-
 #include <stdio.h>
 #include <string.h>
 
@@ -7,12 +6,14 @@
 #include "firefly-cbor.h"
 #include "firefly-crypto.h"
 #include "firefly-hash.h"
+#include "firefly-tx.h"
 
 #include "testcases-h/accounts.h"
 #include "testcases-h/hashes.h"
 #include "testcases-h/hmac.h"
 #include "testcases-h/mnemonics.h"
 #include "testcases-h/pbkdf.h"
+#include "testcases-h/transactions.h"
 
 
 ///////////////////////////////
@@ -181,31 +182,61 @@ int runTestMnemonics(const char* name, const char* phrase,
     return 0;
 }
 
+int runTestTxs(const char* name, const uint8_t *privkey, FfxCborCursor *tx,
+  const uint8_t *sig, const uint8_t *rlpUnsigned, size_t rlpUnsignedLength,
+  const uint8_t *rlpSigned, size_t rlpSignedLength) {
+
+    uint8_t bytes[1024];
+
+    size_t length = sizeof(bytes);
+    FfxTxStatus status = ffx_tx_serializeUnsigned(tx, bytes, &length);
+
+    if (status) {
+        printf("Failed to serialize unsigned tx: status=%d\n", status);
+        ffx_cbor_dump(tx);
+        return 1;
+    }
+
+    if (length != rlpUnsignedLength || cmpbuf(bytes, rlpUnsigned, length)) {
+        printf("Unsigned TX RLP did not match\n");
+        ffx_cbor_dump(tx);
+        dumpBuffer("Actual:   ", bytes, length);
+        dumpBuffer("Expected: ", rlpUnsigned, rlpUnsignedLength);
+        return 1;
+    }
+
+    return 0;
+}
+
 
 ///////////////////////////////
 // Test Data Macros
+
+#define MIN(a,b)    ((a) < (b) ? (a): (b))
 
 #define READ_STRING(NAME,MAXSIZE) \
     char (NAME)[MAXSIZE] = { 0 }; \
     { \
         FfxCborCursor test; \
         ffx_cbor_clone(&test, &cursor); \
-        status = ffx_cbor_followKey(&test, #NAME); \
-        if (status) { printf("BAD FOLLOW STRING: " #NAME "\n"); break; } \
-        status = ffx_cbor_copyData(&test, (uint8_t*)(NAME), MAXSIZE); \
+        if (!ffx_cbor_followKey(&test, #NAME, &status)) { \
+            printf("BAD FOLLOW STRING: " #NAME "\n"); break; \
+        } \
+        FfxCborData data = ffx_cbor_getData(&test, &status); \
         if (status) { printf("BAD COPY: " #NAME "\n"); break; } \
+        memcpy((NAME), data.bytes, MIN((MAXSIZE) - 1, data.length)); \
     }
 
 
 #define READ_DATA(NAME) \
-    const uint8_t *NAME = NULL; \
-    size_t NAME##Length = 0; \
+    FfxCborData NAME = { 0 }; \
     { \
         FfxCborCursor test; \
         ffx_cbor_clone(&test, &cursor); \
-        status = ffx_cbor_followKey(&test, #NAME); \
-        if (status) { printf("BAD FOLLOW DATA: " #NAME "\n"); break; } \
-        status = ffx_cbor_getData(&test, &NAME, &NAME##Length); \
+        if (!ffx_cbor_followKey(&test, #NAME, &status)) { \
+            printf("BAD FOLLOW DATA: key=" #NAME "\n"); break; \
+        } \
+        NAME = ffx_cbor_getData(&test, &status); \
         if (status) { printf("BAD GET DATA: " #NAME "\n"); break; } \
     }
 
@@ -214,9 +245,10 @@ int runTestMnemonics(const char* name, const char* phrase,
     { \
         FfxCborCursor test; \
         ffx_cbor_clone(&test, &cursor); \
-        status = ffx_cbor_followKey(&test, #NAME); \
-        if (status) { printf("BAD FOLLOW VALUE: " #NAME "\n"); break; } \
-        status = ffx_cbor_getValue(&test, &NAME); \
+        if (!ffx_cbor_followKey(&test, #NAME, &status)) { \
+            printf("BAD FOLLOW VALUE: " #NAME "\n"); break; \
+        } \
+        NAME = ffx_cbor_getValue(&test, &status); \
         if (status) { printf("BAD GET VALUE: " #NAME "\n"); break; } \
     }
 
@@ -225,12 +257,12 @@ int runTestMnemonics(const char* name, const char* phrase,
     { \
         FfxCborCursor store; \
         ffx_cbor_clone(&store, &cursor); \
-        status = ffx_cbor_firstValue(&cursor, NULL); \
-        while (!status) {
+        status = FfxCborStatusBeginIterator; \
+        while (ffx_cbor_iterate(&cursor, NULL, &status)) {
 
 #define CLOSE_ARRAY() \
-            status = ffx_cbor_nextValue(&cursor, NULL); \
         } \
+        if (status) { printf("status=%d\n", status); } \
         ffx_cbor_clone(&cursor, &store); \
     }
 
@@ -238,10 +270,11 @@ int runTestMnemonics(const char* name, const char* phrase,
     { \
         FfxCborCursor store; \
         ffx_cbor_clone(&store, &cursor); \
-        status = ffx_cbor_followKey(&cursor, #NAME); \
-        if (status) { printf("BAD FOLLOW ARRAY\n"); break; } \
-        status = ffx_cbor_firstValue(&cursor, NULL); \
-        while (!status) {
+        if (!ffx_cbor_followKey(&cursor, #NAME, &status)) { \
+            printf("BAD FOLLOW ARRAY\n"); break; \
+        } \
+        status = FfxCborStatusBeginIterator; \
+        while (ffx_cbor_iterate(&cursor, NULL, &status)) {
 
 #define START_TESTS(NAME) \
     FfxCborCursor cursor; \
@@ -250,7 +283,7 @@ int runTestMnemonics(const char* name, const char* phrase,
     size_t countPass = 0, countFail = 0, countSkip = 0;
 
 #define END_TESTS(NAME) \
-    if (status != FfxCborStatusOK && status != FfxCborStatusNotFound) { \
+    if (status) { \
         printf("CBOR Error: status=%d test=" #NAME "\n", status); \
         countFail++; \
     } \
@@ -270,7 +303,7 @@ int test_accounts() {
         READ_DATA(privkey)
         READ_STRING(address, 128)
 
-        int result = runTestAccounts(name, privkey, address);
+        int result = runTestAccounts(name, privkey.bytes, address);
 
         if (result) {
             printf("FAIL: %s\n", name);
@@ -296,8 +329,9 @@ int test_hashes() {
         READ_DATA(sha512)
         READ_DATA(keccak256)
 
-        int result = runTestHashes(name, data, dataLength, sha256,
-          sha256Length, sha512, sha512Length, keccak256, keccak256Length);
+        int result = runTestHashes(name, data.bytes, data.length,
+          sha256.bytes, sha256.length, sha512.bytes, sha512.length,
+          keccak256.bytes, keccak256.length);
 
         if (result) {
             printf("FAIL: %s\n", name);
@@ -328,12 +362,14 @@ int test_hmac() {
         memset(digest, 0, length);
 
         if (algorithm == 256) {
-            ffx_hmac_sha256(digest, key, keyLength, data, dataLength);
+            ffx_hmac_sha256(digest, key.bytes, key.length,
+              data.bytes, data.length);
         } else {
-            ffx_hmac_sha512(digest, key, keyLength, data, dataLength);
+            ffx_hmac_sha512(digest, key.bytes, key.length,
+              data.bytes, data.length);
         }
 
-        int result = cmpbuf(digest, hmac, length);
+        int result = cmpbuf(digest, hmac.bytes, length);
 
         if (result) {
             printf("FAIL: %s\n", name);
@@ -361,7 +397,8 @@ int test_mnemonics() {
 
         } else {
             int result = runTestMnemonics(name, phrase, password,
-            strlen(password), entropy, entropyLength, seed, seedLength);
+              strlen(password), entropy.bytes, entropy.length,
+              seed.bytes, seed.length);
 
             if (result) {
                 printf("FAIL: %s\n", name);
@@ -383,7 +420,7 @@ int test_mnemonics() {
                     {
                         FfxHDNode node = { 0 };
 
-                        if (!ffx_hdnode_initSeed(&node, seed)) {
+                        if (!ffx_hdnode_initSeed(&node, seed.bytes)) {
                             printf("bad seed\n");
                             break;
                         }
@@ -393,8 +430,9 @@ int test_mnemonics() {
                             break;
                         }
 
-                        int result = runTestMnemonicsNode(&node, chaincode,
-                          privkey, pubkey, depth, index);
+                        int result = runTestMnemonicsNode(&node,
+                          chaincode.bytes, privkey.bytes, pubkey.bytes,
+                          depth, index);
 
                         if (result) {
                             printf("FAIL: %s (%s)\n", name, _path);
@@ -409,20 +447,21 @@ int test_mnemonics() {
                     {
                         FfxHDNode node = { 0 };
 
-                        if (!ffx_hdnode_initSeed(&node, seed)) {
+                        if (!ffx_hdnode_initSeed(&node, seed.bytes)) {
                             printf("bad seedd\n");
                             break;
                         }
 
                         OPEN_AND_READ_ARRAY(path)
-                            uint64_t index = 0;
-                            status = ffx_cbor_getValue(&cursor, &index);
+                            uint64_t index = ffx_cbor_getValue(&cursor,
+                              &status);
                             if (status) { break; }
                             ffx_hdnode_deriveChild(&node, index);
                         CLOSE_ARRAY()
 
-                        int result = runTestMnemonicsNode(&node, chaincode,
-                          privkey, pubkey, depth, index);
+                        int result = runTestMnemonicsNode(&node,
+                          chaincode.bytes, privkey.bytes, pubkey.bytes,
+                          depth, index);
 
                         if (result) {
                             printf("FAIL: %s (%s)\n", name, _path);
@@ -456,14 +495,14 @@ int test_pbkdf() {
         uint8_t actKey[dkLength];
         memset(actKey, 0, dkLength);
         if (algorithm == 256) {
-            ffx_pbkdf2_sha256(actKey, dkLength, iterations, password,
-              passwordLength, salt, saltLength);
+            ffx_pbkdf2_sha256(actKey, dkLength, iterations, password.bytes,
+              password.length, salt.bytes, salt.length);
         } else {
-            ffx_pbkdf2_sha512(actKey, dkLength, iterations, password,
-              passwordLength, salt, saltLength);
+            ffx_pbkdf2_sha512(actKey, dkLength, iterations, password.bytes,
+              password.length, salt.bytes, salt.length);
         }
 
-        int result = cmpbuf(actKey, key, dkLength);
+        int result = cmpbuf(actKey, key.bytes, dkLength);
 
         if (result) {
             printf("FAIL: %s\n", name);
@@ -474,6 +513,40 @@ int test_pbkdf() {
     CLOSE_ARRAY()
 
     END_TESTS(pbkdf)
+}
+
+int test_transactions() {
+    START_TESTS(transactions)
+
+    OPEN_ARRAY()
+
+        READ_STRING(name, 128)
+
+        READ_DATA(privkey)
+        READ_DATA(sig)
+        READ_DATA(rlpUnsigned)
+        READ_DATA(rlpSigned)
+
+        FfxCborCursor tx;
+        ffx_cbor_clone(&tx, &cursor);
+        if (!ffx_cbor_followKey(&tx, "tx", &status)) { break; }
+
+//if (!strcmp(name, "random-22")) {
+
+        int result = runTestTxs(name, privkey.bytes, &tx, sig.bytes,
+          rlpUnsigned.bytes, rlpUnsigned.length,
+          rlpSigned.bytes, rlpSigned.length);
+
+        if (result) {
+            printf("FAIL: %s\n", name);
+            countFail++;
+        } else {
+            countPass++;
+        }
+//}
+    CLOSE_ARRAY()
+
+    END_TESTS(transactions)
 }
 
 
@@ -488,6 +561,7 @@ int main() {
     countFail += test_hmac();
     countFail += test_mnemonics();
     countFail += test_pbkdf();
+    countFail += test_transactions();
 
     printf("Total: %zu failed\n", countFail);
 
