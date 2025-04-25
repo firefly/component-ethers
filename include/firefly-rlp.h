@@ -1,6 +1,8 @@
 #ifndef __FIREFLY_RLP_H__
 #define __FIREFLY_RLP_H__
 
+#include "firefly-data.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif /* __cplusplus */
@@ -20,7 +22,7 @@ extern "C" {
  *  See: https://ethereum.org/en/developers/docs/data-structures-and-encoding/rlp/
  */
 
-
+/*
 typedef enum FfxRlpStatus {
     FfxRlpStatusOK = 0,
 
@@ -29,6 +31,7 @@ typedef enum FfxRlpStatus {
 
     FfxRlpStatusBeginIterator = 20,
 } FfxRlpStatus;
+*/
 
 typedef enum FfxRlpType {
     FfxRlpTypeError   = 0,
@@ -37,22 +40,26 @@ typedef enum FfxRlpType {
 } FfxRlpType;
 
 typedef struct FfxRlpCursor {
-    uint8_t *data;
+    const uint8_t *data;
     size_t offset, length;
-    size_t containerLength, containerOffset;
+
+    FfxDataError error;
 } FfxRlpCursor;
 
-typedef struct FfxRlpDataResult {
-    uint8_t *bytes;
-    size_t length;
-    FfxRlpStatus status;
-} FfxRlpDataResult;
+typedef struct FfxRlpIterator {
+    FfxRlpCursor child;
+
+    FfxRlpCursor container;
+    size_t containerLength, containerOffset;
+
+    FfxDataError error;
+} FfxRlpIterator;
 
 typedef struct FfxRlpBuilder {
     uint8_t *data;
     size_t offset, length;
 
-    FfxRlpStatus status;
+    FfxDataError error;
 } FfxRlpBuilder;
 
 typedef size_t FfxRlpBuilderTag;
@@ -61,21 +68,22 @@ typedef size_t FfxRlpBuilderTag;
 ///////////////////////////////
 // Walking
 
-void ffx_rlp_walk(FfxRlpCursor *cursor, uint8_t *data, size_t length);
+FfxRlpCursor ffx_rlp_walk(const uint8_t *data, size_t length);
 
-void ffx_rlp_clone(FfxRlpCursor *dst, FfxRlpCursor *src);
+FfxRlpCursor ffx_rlp_clone(const FfxRlpCursor *cursor);
 
-FfxRlpType ffx_rlp_getType(FfxRlpCursor *cursor);
+FfxRlpType ffx_rlp_getType(const FfxRlpCursor *cursor);
 
-size_t ffx_rlp_getLength(FfxRlpCursor *cursor);
+FfxSizeResult ffx_rlp_getLength(const FfxRlpCursor *cursor);
 
-FfxRlpStatus ffx_rlp_followIndex(FfxRlpCursor *cursor, size_t index);
+FfxRlpCursor ffx_rlp_followIndex(const FfxRlpCursor *cursor, size_t index);
 
-FfxRlpDataResult ffx_rlp_getData(FfxRlpCursor *cursor, FfxRlpStatus *error);
+FfxDataResult ffx_rlp_getData(const FfxRlpCursor *cursor);
 
-bool ffx_rlp_iterate(FfxRlpCursor *cursor, FfxRlpStatus *status);
+FfxRlpIterator ffx_rlp_iterate(const FfxRlpCursor *cursor);
+bool ffx_rlp_nextChild(FfxRlpIterator *iterator);
 
-void ffx_rlp_dump(FfxRlpCursor *cursor);
+void ffx_rlp_dump(const FfxRlpCursor *cursor);
 
 
 ///////////////////////////////
@@ -88,7 +96,7 @@ void ffx_rlp_dump(FfxRlpCursor *cursor);
  *  buffer, so the [[rlp_finalize]] MUST be called to complete RLP
  *  serialization.
  */
-void ffx_rlp_build(FfxRlpBuilder *builder, uint8_t *data, size_t length);
+FfxRlpBuilder ffx_rlp_build(uint8_t *data, size_t length);
 
 /**
  *  Remove all intermediate data and return the length of the RLP-encoded

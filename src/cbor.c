@@ -49,7 +49,7 @@ typedef struct CursorInfo {
     FfxDataError error;
 } CursorInfo;
 
-static const CursorInfo getInfo(FfxCborCursor *cursor) {
+static const CursorInfo getInfo(const FfxCborCursor *cursor) {
 
     CursorInfo result = { 0 };
 
@@ -198,7 +198,7 @@ FfxCborCursor ffx_cbor_walk(const uint8_t *data, size_t length) {
     return (FfxCborCursor){ .data = data, .length = length };
 }
 
-FfxCborCursor ffx_cbor_clone(FfxCborCursor *cursor) {
+FfxCborCursor ffx_cbor_clone(const FfxCborCursor *cursor) {
     FfxCborCursor result = { 0 };
     memcpy(&result, cursor, sizeof(FfxCborCursor));
     return result;
@@ -208,16 +208,16 @@ bool ffx_cbor_isDone(FfxCborCursor *cursor) {
     return (cursor->offset == cursor->length);
 }
 
-FfxCborType ffx_cbor_getType(FfxCborCursor *cursor) {
+FfxCborType ffx_cbor_getType(const FfxCborCursor *cursor) {
     if (cursor->offset >= cursor->length) { return FfxCborTypeError; }
     return _getType(cursor->data[cursor->offset]);
 }
 
-bool ffx_cbor_checkType(FfxCborCursor *cursor, FfxCborType types) {
+bool ffx_cbor_checkType(const FfxCborCursor *cursor, FfxCborType types) {
     return (ffx_cbor_getType(cursor) & types);
 }
 
-FfxValueResult ffx_cbor_getValue(FfxCborCursor *cursor) {
+FfxValueResult ffx_cbor_getValue(const FfxCborCursor *cursor) {
     FfxValueResult result = { 0 };
 
     CursorInfo info = getInfo(cursor);
@@ -236,7 +236,7 @@ FfxValueResult ffx_cbor_getValue(FfxCborCursor *cursor) {
 
 // @TODO: refactor these 3 functions
 
-FfxDataResult ffx_cbor_getData(FfxCborCursor *cursor) {
+FfxDataResult ffx_cbor_getData(const FfxCborCursor *cursor) {
 
     FfxDataResult result = { 0 };
 
@@ -261,7 +261,7 @@ FfxDataResult ffx_cbor_getData(FfxCborCursor *cursor) {
     return (FfxDataResult){ .bytes = info.data, .length = info.value };
 }
 
-FfxSizeResult ffx_cbor_getLength(FfxCborCursor *cursor) {
+FfxSizeResult ffx_cbor_getLength(const FfxCborCursor *cursor) {
 
     CursorInfo info = getInfo(cursor);
     if (info.error) { return (FfxSizeResult){ .error = info.error }; }
@@ -283,7 +283,7 @@ FfxSizeResult ffx_cbor_getLength(FfxCborCursor *cursor) {
     return (FfxSizeResult){ .error = FfxDataErrorInvalidOperation };
 }
 
-bool ffx_cbor_checkLength(FfxCborCursor *cursor, FfxCborType types,
+bool ffx_cbor_checkLength(const FfxCborCursor *cursor, FfxCborType types,
   size_t length) {
 
     if (cursor->error) { return false; }
@@ -423,7 +423,7 @@ static bool nextValue(FfxCborIterator *iter) {
     return true;
 }
 
-FfxCborIterator ffx_cbor_iterate(FfxCborCursor *container) {
+FfxCborIterator ffx_cbor_iterate(const FfxCborCursor *container) {
     if (container->error) {
         return (FfxCborIterator){ .error = container->error };
     }
@@ -459,7 +459,7 @@ static bool _keyCompare(const char *key, FfxCborCursor *cursor,
     return true;
 }
 
-FfxCborCursor ffx_cbor_followKey(FfxCborCursor *cursor, const char *key) {
+FfxCborCursor ffx_cbor_followKey(const FfxCborCursor *cursor, const char *key) {
 
     if (!ffx_cbor_checkType(cursor, FfxCborTypeMap)) {
         return (FfxCborCursor){ .error = FfxDataErrorInvalidOperation };
@@ -476,7 +476,7 @@ FfxCborCursor ffx_cbor_followKey(FfxCborCursor *cursor, const char *key) {
     return (FfxCborCursor){ .error = FfxDataErrorNotFound };
 }
 
-FfxCborCursor ffx_cbor_followIndex(FfxCborCursor *cursor, size_t index) {
+FfxCborCursor ffx_cbor_followIndex(const FfxCborCursor *cursor, size_t index) {
 
     if (!ffx_cbor_checkType(cursor, FfxCborTypeArray | FfxCborTypeMap)) {
         return (FfxCborCursor){ .error = FfxDataErrorInvalidOperation };
@@ -496,7 +496,7 @@ FfxCborCursor ffx_cbor_followIndex(FfxCborCursor *cursor, size_t index) {
     return (FfxCborCursor){ .error = FfxDataErrorNotFound };
 }
 
-static void _dump(FfxCborCursor *cursor) {
+static void _dump(const FfxCborCursor *cursor) {
     FfxCborType type = _getType(cursor->data[cursor->offset]);
 
     switch(type) {
@@ -604,7 +604,7 @@ static void _dump(FfxCborCursor *cursor) {
     }
 }
 
-void ffx_cbor_dump(FfxCborCursor *cursor) {
+void ffx_cbor_dump(const FfxCborCursor *cursor) {
     _dump(cursor);
     printf("\n");
 }

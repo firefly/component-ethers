@@ -8,28 +8,6 @@
 #include "firefly-rlp.h"
 
 
-typedef struct TxBuilder {
-    uint8_t *data;
-    size_t offset;
-    size_t length;
-} TxBuilder;
-
-
-static FfxTxStatus mungeRlpStatus(FfxRlpStatus status) {
-    switch(status) {
-        case FfxRlpStatusOK:
-            return FfxTxStatusOK;
-        case FfxRlpStatusBufferOverrun:
-            return FfxTxStatusBufferOverrun;
-        case FfxRlpStatusOverflow:
-            return FfxTxStatusOverflow;
-        case FfxRlpStatusBeginIterator:
-            break;
-    }
-
-    return FfxTxStatusBadData;
-}
-
 static FfxTxStatus mungeDataError(FfxDataError error) {
     switch (error) {
         case FfxDataErrorNone:
@@ -59,7 +37,7 @@ static FfxTxStatus append(FfxRlpBuilder *rlp, Format format, FfxCborCursor *tx,
     FfxCborCursor value = ffx_cbor_followKey(tx, key);
     if (value.error == FfxDataErrorNotFound) {
         ffx_rlp_appendData(rlp, NULL, 0);
-        return mungeRlpStatus(rlp->status);
+        return mungeDataError(rlp->error);
     } else if (value.error) {
         return FfxTxStatusBadData;
     }
@@ -91,7 +69,7 @@ static FfxTxStatus append(FfxRlpBuilder *rlp, Format format, FfxCborCursor *tx,
     }
 
     ffx_rlp_appendData(rlp, bytes, length);
-    return mungeRlpStatus(rlp->status);
+    return mungeDataError(rlp->error);
 }
 
 #define readDataLength(NAME,CURSOR,LENGTH) \
@@ -128,7 +106,7 @@ static FfxTxStatus appendAccessList(FfxRlpBuilder *rlp, FfxCborCursor *tx) {
     FfxCborCursor accessList = ffx_cbor_followKey(tx, "accessList");
     if (accessList.error == FfxDataErrorNotFound) {
         ffx_rlp_appendArray(rlp, 0);
-        return mungeRlpStatus(rlp->status);
+        return mungeDataError(rlp->error);
     } else if (accessList.error) {
         return FfxTxStatusBadData;
     }
@@ -137,7 +115,7 @@ static FfxTxStatus appendAccessList(FfxRlpBuilder *rlp, FfxCborCursor *tx) {
 
     size_t i = 0;
     FfxRlpBuilderTag iTag = ffx_rlp_appendMutableArray(rlp);
-    if (rlp->status) { return mungeRlpStatus(rlp->status); }
+    if (rlp->error) { return mungeDataError(rlp->error); }
 
     FfxCborIterator iter = ffx_cbor_iterate(&accessList);
     while (ffx_cbor_nextChild(&iter)) {
@@ -146,7 +124,7 @@ static FfxTxStatus appendAccessList(FfxRlpBuilder *rlp, FfxCborCursor *tx) {
         checkArrayLength(&iter.child, 2);
 
         ffx_rlp_appendArray(rlp, 2);
-        if (rlp->status) { return mungeRlpStatus(rlp->status); }
+        if (rlp->error) { return mungeDataError(rlp->error); }
 
         // Check: X = [ data: 20 bytes ]
         FfxCborCursor address = ffx_cbor_followIndex(&iter.child, 0);
@@ -155,7 +133,7 @@ static FfxTxStatus appendAccessList(FfxRlpBuilder *rlp, FfxCborCursor *tx) {
         {
             readDataLength(data, &address, 20);
             ffx_rlp_appendData(rlp, data.bytes, data.length);
-            if (rlp->status) { return mungeRlpStatus(rlp->status); }
+            if (rlp->error) { return mungeDataError(rlp->error); }
         }
 
         // Check: Y = [ ]
@@ -166,14 +144,14 @@ static FfxTxStatus appendAccessList(FfxRlpBuilder *rlp, FfxCborCursor *tx) {
 
         size_t si = 0;
         FfxRlpBuilderTag siTag = ffx_rlp_appendMutableArray(rlp);
-        if (rlp->status) { return mungeRlpStatus(rlp->status); }
+        if (rlp->error) { return mungeDataError(rlp->error); }
 
         FfxCborIterator iterSlots = ffx_cbor_iterate(&slots);
         while (ffx_cbor_nextChild(&iterSlots)) {
             readDataLength(data, &iterSlots.child, 32);
 
             ffx_rlp_appendData(rlp, data.bytes, data.length);
-            if (rlp->status) { return mungeRlpStatus(rlp->status); }
+            if (rlp->error) { return mungeDataError(rlp->error); }
 
             si++;
             ffx_rlp_adjustCount(rlp, siTag, si);
@@ -185,7 +163,7 @@ static FfxTxStatus appendAccessList(FfxRlpBuilder *rlp, FfxCborCursor *tx) {
 
     if (iter.child.error) { return mungeDataError(iter.child.error); }
 
-    return mungeRlpStatus(rlp->status);
+    return mungeDataError(rlp->error);
 }
 
 
@@ -193,7 +171,7 @@ static FfxTxStatus appendAccessList(FfxRlpBuilder *rlp, FfxCborCursor *tx) {
 FfxTxStatus serialize1559(FfxCborCursor *tx, FfxRlpBuilder *rlp) {
 
     // The Unsigned EIP-1559 Tx has 9 fields
-    if (!ffx_rlp_appendArray(rlp, 9)) { return mungeRlpStatus(rlp->status); }
+    if (!ffx_rlp_appendArray(rlp, 9)) { return mungeDataError(rlp->error); }
 
     FfxTxStatus status = FfxTxStatusOK;
 
@@ -223,7 +201,7 @@ FfxTxStatus serialize1559(FfxCborCursor *tx, FfxRlpBuilder *rlp) {
     if (status) { return status; }
 
     //if (!ffx_rlp_appendArray(&rlp, 0)) {
-    //    return mungeRlpStatus(rlp.status);
+    //    return mungeDataError(rlp.status);
     //}
 
     status = appendAccessList(rlp, tx);
@@ -296,8 +274,7 @@ FfxTx ffx_tx_serializeUnsigned(FfxCborCursor *tx, uint8_t *data, size_t length) 
     data[0] = result.type;
 
     // Skip the Envelope Type during RLP output
-    FfxRlpBuilder rlp = { 0 };
-    ffx_rlp_build(&rlp, &data[1], length - 1);
+    FfxRlpBuilder rlp = ffx_rlp_build(&data[1], length - 1);
 
     result.rlp.bytes = data;
 

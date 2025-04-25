@@ -67,19 +67,17 @@
 ///////////////////////////////
 // Walking
 
-void ffx_rlp_walk(FfxRlpCursor *cursor, uint8_t *data, size_t length) {
-    cursor->data = data;
-    cursor->length = length;
-
-    cursor->offset = 0;
-    cursor->containerLength = cursor->containerOffset = 0;
+FfxRlpCursor ffx_rlp_walk(const uint8_t *data, size_t length) {
+    return (FfxRlpCursor){ .data = data, .length = length };
 }
 
-void ffx_rlp_clone(FfxRlpCursor *dst, FfxRlpCursor *src) {
-    memmove(dst, src, sizeof(FfxRlpCursor));
+FfxRlpCursor ffx_rlp_clone(const FfxRlpCursor *cursor) {
+    FfxRlpCursor result = { 0 };
+    memcpy(&result, cursor, sizeof(FfxRlpCursor));
+    return result;
 }
 
-FfxRlpType ffx_rlp_getType(FfxRlpCursor *cursor) {
+FfxRlpType ffx_rlp_getType(const FfxRlpCursor *cursor) {
     if (cursor->offset >= cursor->length) { return FfxRlpTypeError; }
 
     switch (cursor->data[cursor->offset] & 0xc0) {
@@ -93,7 +91,6 @@ FfxRlpType ffx_rlp_getType(FfxRlpCursor *cursor) {
 }
 
 //size_t ffx_rlp_getLength(FfxRlpCursor *cursor) {
-    
 //}
 
 //FfxRlpStatus ffx_rlp_followIndex(FfxRlpCursor *cursor, size_t index) {
@@ -169,10 +166,10 @@ static size_t getByteCount(size_t value) {
 
 static bool appendByte(FfxRlpBuilder *rlp, uint8_t byte) {
 
-    if (rlp->status) { return false; }
+    if (rlp->error) { return false; }
 
     if (rlp->length < rlp->offset + 1) {
-        rlp->status = FfxRlpStatusBufferOverrun;
+        rlp->error = FfxDataErrorBufferOverrun;
         return false;
     }
 
@@ -183,10 +180,10 @@ static bool appendByte(FfxRlpBuilder *rlp, uint8_t byte) {
 static bool appendBytes(FfxRlpBuilder *rlp, const uint8_t *data,
   size_t length) {
 
-    if (rlp->status) { return false; }
+    if (rlp->error) { return false; }
 
     if (rlp->length < rlp->offset + length) {
-        rlp->status = FfxRlpStatusBufferOverrun;
+        rlp->error = FfxDataErrorBufferOverrun;
         return false;
     }
 
@@ -200,7 +197,7 @@ static bool appendBytes(FfxRlpBuilder *rlp, const uint8_t *data,
 // to be swapped out for number of bytes in the final RLP.
 static bool appendHeader(FfxRlpBuilder *rlp, uint8_t tag, size_t length) {
 
-    if (rlp->status) { return false; }
+    if (rlp->error) { return false; }
 
     if (tag != TAG_RESERVE && length <= 55) {
         return appendByte(rlp, tag + length);
@@ -227,17 +224,14 @@ static bool appendHeader(FfxRlpBuilder *rlp, uint8_t tag, size_t length) {
 ///////////////////////////////
 // Building
 
-void ffx_rlp_build(FfxRlpBuilder *rlp, uint8_t *data, size_t length) {
-    rlp->data = data;
-    rlp->offset = 0;
-    rlp->length = length;
-    rlp->status = FfxRlpStatusOK;
+FfxRlpBuilder ffx_rlp_build(uint8_t *data, size_t length) {
+    return (FfxRlpBuilder){ .data = data, .length = length };
 }
 
 bool ffx_rlp_appendData(FfxRlpBuilder *rlp, const uint8_t *data,
   size_t length) {
 
-    if (rlp->status) { return false; }
+    if (rlp->error) { return false; }
 
     if (length == 1 && data[0] <= 127) {
         return appendByte(rlp, data[0]);
@@ -268,7 +262,7 @@ FfxRlpBuilderTag ffx_rlp_appendMutableArray(FfxRlpBuilder *rlp) {
 
 bool ffx_rlp_adjustCount(FfxRlpBuilder *rlp, FfxRlpBuilderTag tag,
   size_t count) {
-    if (tag == 0 || rlp->status) { return false; }
+    if (tag == 0 || rlp->error) { return false; }
 
     size_t offset = rlp->offset;
     rlp->offset = tag;
@@ -334,7 +328,7 @@ static size_t finalize(FfxRlpBuilder *rlp) {
 }
 
 size_t ffx_rlp_finalize(FfxRlpBuilder *rlp) {
-    if (rlp->status) { return 0; }
+    if (rlp->error) { return 0; }
 
     // Store the non-compact length to minimize compaction memmoves
     rlp->length = rlp->offset;
