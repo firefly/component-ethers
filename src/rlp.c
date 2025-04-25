@@ -64,6 +64,102 @@
  *  consume to get the length.
  */
 
+///////////////////////////////
+// Walking
+
+void ffx_rlp_walk(FfxRlpCursor *cursor, uint8_t *data, size_t length) {
+    cursor->data = data;
+    cursor->length = length;
+
+    cursor->offset = 0;
+    cursor->containerLength = cursor->containerOffset = 0;
+}
+
+void ffx_rlp_clone(FfxRlpCursor *dst, FfxRlpCursor *src) {
+    memmove(dst, src, sizeof(FfxRlpCursor));
+}
+
+FfxRlpType ffx_rlp_getType(FfxRlpCursor *cursor) {
+    if (cursor->offset >= cursor->length) { return FfxRlpTypeError; }
+
+    switch (cursor->data[cursor->offset] & 0xc0) {
+        case TAG_ARRAY:
+            return FfxRlpTypeArray;
+        case 0: case TAG_DATA:
+            return FfxRlpTypeData;
+    }
+
+    return FfxRlpTypeError;
+}
+
+//size_t ffx_rlp_getLength(FfxRlpCursor *cursor) {
+    
+//}
+
+//FfxRlpStatus ffx_rlp_followIndex(FfxRlpCursor *cursor, size_t index) {
+//}
+
+//FfxRlpData ffx_rlp_getData(FfxRlpCursor *cursor, FfxRlpStatus *error) {
+//}
+
+//bool ffx_rlp_iterate(FfxRlpCursor *cursor, FfxRlpStatus *status) {
+//}
+/*
+static void _dump(FfxRlpCursor *cursor) {
+    FfxRlpType type = ffx_rlp_getType(cursor);
+
+    FfxRlpStatus status = FfxRlpStatusOK;
+
+    switch(type) {
+        case FfxRlpTypeData: {
+            FfxRlpDataResult data = ffx_rlp_getData(cursor, &status);
+            if (status) { break; }
+
+            printf("0x");
+            for (int i = 0; i < data.length; i++) {
+                printf("%02x", data.bytes[i]);
+            }
+            break;
+        }
+
+        case FfxRlpTypeArray: {
+            printf("[ ");
+
+            bool first = true;
+
+            FfxRlpCursor follow;
+            ffx_rlp_clone(&follow, cursor);
+
+            FfxRlpStatus status = FfxRlpStatusBeginIterator;
+            while (ffx_rlp_iterate(&follow, &status)) {
+                if (!first) { printf(", "); }
+                first = false;
+                _dump(&follow);
+            }
+
+            if (status) { break; }
+
+            if (!first) { printf(" "); }
+            printf("]");
+            break;
+        }
+
+        default:
+            printf("<ERROR type=%d>", type);
+            return;
+    }
+
+    if (status) { printf("<ERROR status=%d>", status); }
+}
+
+void ffx_rlp_dump(FfxRlpCursor *cursor) {
+    _dump(cursor);
+    printf("\n");
+}
+*/
+///////////////////////////////
+// Building - utils
+
 static size_t getByteCount(size_t value) {
     if (value < 0x100) { return 1; }
     if (value < 0x10000) { return 2; }
@@ -129,7 +225,7 @@ static bool appendHeader(FfxRlpBuilder *rlp, uint8_t tag, size_t length) {
 
 
 ///////////////////////////////
-// API
+// Building
 
 void ffx_rlp_build(FfxRlpBuilder *rlp, uint8_t *data, size_t length) {
     rlp->data = data;

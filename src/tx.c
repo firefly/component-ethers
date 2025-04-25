@@ -23,19 +23,21 @@ static FfxTxStatus mungeRlpStatus(FfxRlpStatus status) {
             return FfxTxStatusBufferOverrun;
         case FfxRlpStatusOverflow:
             return FfxTxStatusOverflow;
+        case FfxRlpStatusBeginIterator:
+            break;
     }
 
     return FfxTxStatusBadData;
 }
 
-static FfxTxStatus mungeCborStatus(FfxCborStatus status) {
-    switch(status) {
-        case FfxCborStatusOK:
+static FfxTxStatus mungeDataError(FfxDataError error) {
+    switch (error) {
+        case FfxDataErrorNone:
             return FfxTxStatusOK;
-        case FfxCborStatusBufferOverrun:
-            return FfxTxStatusBufferOverrun;
-        case FfxCborStatusOverflow:
+        case FfxDataErrorOverflow:
             return FfxTxStatusOverflow;
+        case FfxDataErrorBufferOverrun:
+            return FfxTxStatusBufferOverrun;
         default:
             break;
     }
@@ -54,23 +56,20 @@ typedef enum Format {
 static FfxTxStatus append(FfxRlpBuilder *rlp, Format format, FfxCborCursor *tx,
   const char* key) {
 
-    FfxCborCursor value;
-    ffx_cbor_clone(&value, tx);
-
-    FfxCborStatus error = FfxCborStatusOK;
-
-    if (!ffx_cbor_followKey(&value, key, &error)) {
-        if (error) { return FfxTxStatusBadData; }
+    FfxCborCursor value = ffx_cbor_followKey(tx, key);
+    if (value.error == FfxDataErrorNotFound) {
         ffx_rlp_appendData(rlp, NULL, 0);
         return mungeRlpStatus(rlp->status);
+    } else if (value.error) {
+        return FfxTxStatusBadData;
     }
 
     if (!ffx_cbor_checkType(&value, FfxCborTypeData)) {
         return FfxTxStatusBadData;
     }
 
-    FfxCborData data = ffx_cbor_getData(&value, &error);
-    if (error) { return FfxTxStatusBadData; }
+    FfxDataResult data = ffx_cbor_getData(&value);
+    if (data.error) { return FfxTxStatusBadData; }
 
     const uint8_t *bytes = data.bytes;
     size_t length = data.length;
@@ -95,133 +94,14 @@ static FfxTxStatus append(FfxRlpBuilder *rlp, Format format, FfxCborCursor *tx,
     return mungeRlpStatus(rlp->status);
 }
 
-/*
-static FfxTxStatus appendAccessListItem(FfxRlpBuilder *rlp,
-  FfxCborCursor *item) {
-
-    if (ffx_cbor_getType(item) != FfxCborTypeArray ||
-      !ffx_cbor_isLength(item, 2)) { return FfxTxStatusBadData; }
-
-    FfxRlpStatus rlpStatus = ffx_rlp_appendArray(rlp, 2);
-    if (rlpStatus) { return mungeRlpStatus(rlpStatus); }
-
-    {
-        FfxCborCursor address = { 0 };
-        ffx_cbor_clone(&address, item);
-        FfxCborStatus cborStatus = ffx_cbor_followIndex(&address, 0);
-        if (cborStatus) { return mungeCborStatus(cborStatus); }
-
-        if (ffx_cbor_getType(&address) != FfxCborTypeData ||
-          !ffx_cbor_isLength(&address, 20)) { return FfxTxStatusBadData; }
-
-        const uint8_t *data = NULL;
-        cborStatus = ffx_cbor_getData(&address, &data, NULL);
-        if (cborStatus || data == NULL) { return FfxTxStatusBadData; }
-
-        ffx_rlp_appendData(rlp, data, 20);
-    }
-
-    {
-        FfxCborCursor storage = { 0 };
-        ffx_cbor_clone(&storage, item);
-        FfxCborStatus cborStatus = ffx_cbor_followIndex(&storage, 1);
-        if (cborStatus) { return mungeCborStatus(cborStatus); }
-
-        if (ffx_cbor_getType(&storage) != FfxCborTypeArray) {
-            return FfxTxStatusBadData;
-        }
-
-        size_t count = 0;
-        cborStatus = ffx_cbor_getLength(&storage, &count);
-        if (cborStatus) { return FfxTxStatusBadData; }
-
-        ffx_rlp_appendArray(rlp, count);
-
-        FfxCborStatus error = 33; //FfxCborStatusOK;
-        while (ffx_cbor_iterate(&storage, NULL, &error)) {
-            if (ffx_cbor_getType(&storage) != FfxCborTypeData ||
-              !ffx_cbor_isLength(&storage, 32)) { return FfxTxStatusBadData; }
-
-            const uint8_t *data = NULL;
-            cborStatus = ffx_cbor_getData(&storage, &data, NULL);
-            if (cborStatus || data == NULL) { return FfxTxStatusBadData; }
-
-            ffx_rlp_appendData(rlp, data, 32);
-        }
-
-        if (error) { return mungeCborStatus(error); }
-    }
-
-    return FfxTxStatusOK;
-}
-*/
-/*
-static FfxTxStatus appendAccessList(FfxRlpBuilder *rlp, FfxCborCursor *tx) {
-
-    // Copy the access list (if any) to the RLP
-
-    FfxCborStatus error = FfxCborStatusOK;
-
-    FfxCborCursor accessList = { 0 };
-    ffx_cbor_clone(&accessList, tx);
-    if (!ffx_cbor_followKey(&accessList, "accessList", &error)) {
-        if (error) { return FfxTxStatusBadData; }
-        rlpStatus = ffx_rlp_appendArray(&rlp, 0);
-        return FfxTxStatusOK;
-    }
-
-    if (!ffx_cbor_checkType(accessList, FfxCborArray)) {
-        return FfxTxStatusBadData;
-    }
-
-    size_t length = ffx_cbor_getLength(&accessList, &error);
-    if (error) { return FfxTxStatusBadData; }
-    FfxRlpStatus rlpStatus = ffx_rlp_appendArray(rlp, length);
-    if (rlpStatus) { return mungeRlpStatus(rlpStatus); }
-
-    FfxCborStatus status = FfxCborStatusBeginIterator;
-    while (ffx_cbor_iterate(&accessList, NULL, &status)) {
-
-        if (!ffx_cbor_checkType(&accessList, FfxCborArray) ||
-          ffx_cbor_getLength(&accessList, &status) != 2 || status) {
-            return FfxTxStatusBadData;
-        }
-
-        // Address
-
-        FfxCborCursor address;
-        ffx_cbor_clone(&address, &accessList);
-
-        if (!ffx_cbor_followIndex(address, 0, &status) ||
-          !ffx_cbor_checkType(address, FfxCborTypeData) ||
-          !ffx_cbor_checkLength(&address, 20) || status) {
-            return FfxTxStatusBadData;
-        }
-
-        FfxCborData data = ffx_cbor_getData(&address, &status);
-        if (status) { return FfxTxStatusBadData; }
-
-        rlpStatus = ffx_rlp_appendData(rlp, data.bytes, data.length);
-        if (rlpStatus) { return mungeRlpStatus(rlpStatus); }
-
-        // Slots
-
-        rlpStatus = ffx_rlp_appendArray(&rlp, 0);
-    }
-
-    return FfxTxStatusOK;
-}
-*/
-
 #define readDataLength(NAME,CURSOR,LENGTH) \
-    FfxCborData (NAME) = { 0 }; \
+    FfxDataResult (NAME) = { 0 }; \
     { \
         if (!ffx_cbor_checkType((CURSOR), FfxCborTypeData)) { \
             return FfxTxStatusBadData; \
         } \
-        FfxCborStatus error = FfxCborStatusOK; \
-        (NAME) = ffx_cbor_getData((CURSOR), &error); \
-        if (error || (NAME).length != (LENGTH)) { \
+        (NAME) = ffx_cbor_getData(CURSOR); \
+        if ((NAME).error || (NAME).length != (LENGTH)) { \
             return FfxTxStatusBadData;  \
         } \
     }
@@ -235,8 +115,7 @@ static FfxTxStatus appendAccessList(FfxRlpBuilder *rlp, FfxCborCursor *tx) {
 
 #define checkArrayLength(cbor,length) \
     do { \
-        if (!ffx_cbor_checkType((cbor), FfxCborTypeArray) || \
-          !ffx_cbor_checkLength((cbor), (length))) { \
+        if (!ffx_cbor_checkLength((cbor), FfxCborTypeArray, (length))) { \
             return FfxTxStatusBadData; \
         } \
     } while(0);
@@ -245,15 +124,13 @@ static FfxTxStatus appendAccessList(FfxRlpBuilder *rlp, FfxCborCursor *tx) {
 static FfxTxStatus appendAccessList(FfxRlpBuilder *rlp, FfxCborCursor *tx) {
     // Copy the access list (if any) to the RLP
 
-    FfxCborStatus error = FfxCborStatusOK;
-
     // If the accessList key is absent, use the default, an empty access list
-    FfxCborCursor accessList = { 0 };
-    ffx_cbor_clone(&accessList, tx);
-    if (!ffx_cbor_followKey(&accessList, "accessList", &error)) {
-        if (error) { return FfxTxStatusBadData; }
+    FfxCborCursor accessList = ffx_cbor_followKey(tx, "accessList");
+    if (accessList.error == FfxDataErrorNotFound) {
         ffx_rlp_appendArray(rlp, 0);
         return mungeRlpStatus(rlp->status);
+    } else if (accessList.error) {
+        return FfxTxStatusBadData;
     }
 
     checkArray(&accessList);
@@ -262,21 +139,18 @@ static FfxTxStatus appendAccessList(FfxRlpBuilder *rlp, FfxCborCursor *tx) {
     FfxRlpBuilderTag iTag = ffx_rlp_appendMutableArray(rlp);
     if (rlp->status) { return mungeRlpStatus(rlp->status); }
 
-    error = FfxCborStatusBeginIterator;
-    while (ffx_cbor_iterate(&accessList, NULL, &error)) {
+    FfxCborIterator iter = ffx_cbor_iterate(&accessList);
+    while (ffx_cbor_nextChild(&iter)) {
 
         // Check: [ address, slots ]
-        checkArrayLength(&accessList, 2);
+        checkArrayLength(&iter.child, 2);
 
         ffx_rlp_appendArray(rlp, 2);
         if (rlp->status) { return mungeRlpStatus(rlp->status); }
 
         // Check: X = [ data: 20 bytes ]
-        FfxCborCursor address = { 0 };
-        ffx_cbor_clone(&address, &accessList);
-        if (!ffx_cbor_followIndex(&address, 0, &error)) {
-            return FfxTxStatusBadData;
-        }
+        FfxCborCursor address = ffx_cbor_followIndex(&iter.child, 0);
+        if (address.error) { return FfxTxStatusBadData; }
 
         {
             readDataLength(data, &address, 20);
@@ -285,10 +159,8 @@ static FfxTxStatus appendAccessList(FfxRlpBuilder *rlp, FfxCborCursor *tx) {
         }
 
         // Check: Y = [ ]
-        FfxCborCursor slots = { 0 };
-        ffx_cbor_clone(&slots, &accessList);
-        if (!ffx_cbor_followIndex(&slots, 1, &error) ||
-          !ffx_cbor_checkType(&slots, FfxCborTypeArray)) {
+        FfxCborCursor slots = ffx_cbor_followIndex(&iter.child, 1);
+        if (slots.error || !ffx_cbor_checkType(&slots, FfxCborTypeArray)) {
             return FfxTxStatusBadData;
         }
 
@@ -296,9 +168,9 @@ static FfxTxStatus appendAccessList(FfxRlpBuilder *rlp, FfxCborCursor *tx) {
         FfxRlpBuilderTag siTag = ffx_rlp_appendMutableArray(rlp);
         if (rlp->status) { return mungeRlpStatus(rlp->status); }
 
-        error = FfxCborStatusBeginIterator;
-        while (ffx_cbor_iterate(&slots, NULL, &error)) {
-            readDataLength(data, &slots, 32);
+        FfxCborIterator iterSlots = ffx_cbor_iterate(&slots);
+        while (ffx_cbor_nextChild(&iterSlots)) {
+            readDataLength(data, &iterSlots.child, 32);
 
             ffx_rlp_appendData(rlp, data.bytes, data.length);
             if (rlp->status) { return mungeRlpStatus(rlp->status); }
@@ -311,62 +183,127 @@ static FfxTxStatus appendAccessList(FfxRlpBuilder *rlp, FfxCborCursor *tx) {
         ffx_rlp_adjustCount(rlp, iTag, i);
     }
 
-    if (error) { return mungeCborStatus(error); }
+    if (iter.child.error) { return mungeDataError(iter.child.error); }
 
     return mungeRlpStatus(rlp->status);
 }
 
-FfxTxStatus ffx_tx_serializeUnsigned(FfxCborCursor *tx, uint8_t *data, size_t *_length) {
-    size_t length = *_length;
 
-    if (length < 1) { return FfxTxStatusBufferOverrun; }
 
-    // @TODO: for non-1559: FfxTxStatusUnsupportedVersion,
-
-    // Add the EIP-2718 Envelope Type;
-    data[0] = 2;
-
-    // Skip the Envelope Type
-    FfxRlpBuilder rlp = { 0 };
-    ffx_rlp_build(&rlp, &data[1], length - 1);
+FfxTxStatus serialize1559(FfxCborCursor *tx, FfxRlpBuilder *rlp) {
 
     // The Unsigned EIP-1559 Tx has 9 fields
-    if (!ffx_rlp_appendArray(&rlp, 9)) { return mungeRlpStatus(rlp.status); }
+    if (!ffx_rlp_appendArray(rlp, 9)) { return mungeRlpStatus(rlp->status); }
 
     FfxTxStatus status = FfxTxStatusOK;
 
-    status = append(&rlp, FormatNumber, tx, "chainId");
+    status = append(rlp, FormatNumber, tx, "chainId");
     if (status) { return status; }
 
-    status = append(&rlp, FormatNumber, tx, "nonce");
+    status = append(rlp, FormatNumber, tx, "nonce");
+    if (status) { return status; }
+    // @TODO: Copy nonce
+
+    status = append(rlp, FormatNumber, tx, "maxPriorityFeePerGas");
     if (status) { return status; }
 
-    status = append(&rlp, FormatNumber, tx, "maxPriorityFeePerGas");
+    status = append(rlp, FormatNumber, tx, "maxFeePerGas");
     if (status) { return status; }
 
-    status = append(&rlp, FormatNumber, tx, "maxFeePerGas");
+    status = append(rlp, FormatNumber, tx, "gasLimit");
     if (status) { return status; }
 
-    status = append(&rlp, FormatNumber, tx, "gasLimit");
+    status = append(rlp, FormatNullableAddress, tx, "to");
     if (status) { return status; }
 
-    status = append(&rlp, FormatNullableAddress, tx, "to");
+    status = append(rlp, FormatNumber, tx, "value");
     if (status) { return status; }
 
-    status = append(&rlp, FormatNumber, tx, "value");
-    if (status) { return status; }
-
-    status = append(&rlp, FormatData, tx, "data");
+    status = append(rlp, FormatData, tx, "data");
     if (status) { return status; }
 
     //if (!ffx_rlp_appendArray(&rlp, 0)) {
     //    return mungeRlpStatus(rlp.status);
     //}
 
-    status = appendAccessList(&rlp, tx);
+    status = appendAccessList(rlp, tx);
     if (status) { return status; }
 
-    *_length = ffx_rlp_finalize(&rlp) + 1;
+    return FfxTxStatusOK;
+}
 
-    return mungeRlpStatus(rlp.status);
+typedef struct ReadNumber {
+    uint64_t value;
+    FfxTxStatus status;
+} ReadNumber;
+
+ReadNumber readNumber(FfxCborCursor *tx, const char* key) {
+    ReadNumber result = { 0 };
+
+    FfxCborCursor follow = ffx_cbor_followKey(tx, key);
+    if (follow.error) {
+        return (ReadNumber){ .status = mungeDataError(follow.error) };
+    } else if (!ffx_cbor_checkType(&follow, FfxCborTypeData)) {
+        return (ReadNumber){ .status = FfxTxStatusBadData };
+    }
+
+    FfxDataResult data = ffx_cbor_getData(&follow);
+    if (data.error) {
+        result.status = mungeDataError(data.error);
+        return result;
+    }
+
+    if (data.length > 8) {
+        result.status = FfxTxStatusOverflow;
+        return result;
+    }
+
+    for (int i = 0; i < data.length; i++) {
+        result.value <<= 8;
+        result.value |= data.bytes[i];
+    }
+
+    return result;
+}
+
+FfxTx ffx_tx_serializeUnsigned(FfxCborCursor *tx, uint8_t *data, size_t length) {
+    FfxTx result = { 0 };
+
+    {
+        ReadNumber type = readNumber(tx, "type");
+        if (type.value > 0x7f) { type.status = FfxTxStatusUnsupportedType; }
+        if (type.status) {
+            result.status = type.status;
+            return result;
+        }
+
+        result.type = type.value;
+    }
+
+    switch (result.type) {
+        case 2:
+            break;
+        default:
+            result.status = FfxTxStatusUnsupportedType;
+            return result;
+    }
+
+    // Add the EIP-2718 Envelope Type;
+    if (length < 1) {
+        result.status = FfxTxStatusBufferOverrun;
+        return result;
+    }
+    data[0] = result.type;
+
+    // Skip the Envelope Type during RLP output
+    FfxRlpBuilder rlp = { 0 };
+    ffx_rlp_build(&rlp, &data[1], length - 1);
+
+    result.rlp.bytes = data;
+
+    FfxTxStatus status = serialize1559(tx, &rlp);
+    result.rlp.length = ffx_rlp_finalize(&rlp) + 1;
+    if (status) { result.status = status; }
+
+    return result;
 }

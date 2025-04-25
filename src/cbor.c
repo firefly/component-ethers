@@ -10,8 +10,9 @@
 #include "firefly-cbor.h"
 
 
-#define MAX_LENGTH      (0x1000000)
+#define MAX_LENGTH      (0xffffff)
 
+#define FIRST_ITER      (0xf000000)
 
 ///////////////////////////////
 // Crawler - utils
@@ -40,21 +41,97 @@ static FfxCborType _getType(uint8_t header) {
     return FfxCborTypeError;
 }
 
+typedef struct CursorInfo {
+    const uint8_t *data;
+    FfxCborType type;
+    uint64_t value;
+    size_t safe, headerSize;
+    FfxDataError error;
+} CursorInfo;
+
+static const CursorInfo getInfo(FfxCborCursor *cursor) {
+
+    CursorInfo result = { 0 };
+
+    size_t length = cursor->length;
+    size_t offset = cursor->offset;
+    if (offset >= length) {
+        return (CursorInfo){ .error = FfxDataErrorBufferOverrun };
+    }
+
+    result.safe = length - offset - 1;
+
+    const uint8_t *data = &cursor->data[cursor->offset];
+
+    uint8_t header = *data++;
+    result.headerSize = 1;
+
+    result.type = _getType(header);
+
+    switch(result.type) {
+        case FfxCborTypeError:
+            return (CursorInfo){ .error = FfxDataErrorUnsupportedFeature };
+        case FfxCborTypeNull:
+            result.value = 0;
+            return result;
+        case FfxCborTypeBoolean:
+            result.value = (((header & 0x1f) == 21) ? 1: 0);
+            return result;
+        default:
+            break;
+    }
+
+    // Short value
+    uint32_t count = header & 0x1f;
+    if (count <= 23) {
+        result.data = data;
+        result.value = count;
+        return result;
+    }
+
+    // Indefinite lengths are not currently unsupported
+    if (count > 27) {
+        return (CursorInfo){ .error = FfxDataErrorUnsupportedFeature };
+    }
+
+    // Count bytes
+    // 24 => 0, 25 => 1, 26 => 2, 27 => 3
+    count = 1 << (count - 24);
+    if (count > result.safe) {
+        return (CursorInfo){ .error = FfxDataErrorBufferOverrun };
+    }
+
+    result.headerSize = 1 + count;
+
+    // Read the count bytes as the value
+    uint64_t v = 0;
+    for (int i = 0; i < count; i++) {
+        v = (v << 8) | *data++;
+    }
+    result.data = data;
+    result.value = v;
+
+    // Remove the read bytes from the safe count
+    result.safe -= count;
+
+    return result;
+}
+
 static const uint8_t* _getBytes(FfxCborCursor *cursor, FfxCborType *type,
-  uint64_t *value, size_t *safe, size_t *headerSize, FfxCborStatus *status) {
+  uint64_t *value, size_t *safe, size_t *headerSize, FfxDataError *error) {
 
     *headerSize = 0;
 
     size_t length = cursor->length;
     size_t offset = cursor->offset;
     if (offset >= length) {
-        *status = FfxCborStatusBufferOverrun;
+        *error = FfxDataErrorBufferOverrun;
         return NULL;
     }
 
     *value = 0;
     *safe = length - offset - 1;
-    *status = FfxCborStatusOK;
+    *error = FfxDataErrorNone;
 
     const uint8_t *data = &cursor->data[cursor->offset];
 
@@ -65,7 +142,7 @@ static const uint8_t* _getBytes(FfxCborCursor *cursor, FfxCborType *type,
 
     switch(*type) {
         case FfxCborTypeError:
-            *status = FfxCborStatusUnsupportedType;
+            *error = FfxDataErrorUnsupportedFeature;
             return NULL;
         case FfxCborTypeNull:
             *value = 0;
@@ -86,7 +163,7 @@ static const uint8_t* _getBytes(FfxCborCursor *cursor, FfxCborType *type,
 
     // Indefinite lengths are not currently unsupported
     if (count > 27) {
-        *status = FfxCborStatusUnsupportedType;
+        *error = FfxDataErrorUnsupportedFeature;
         return NULL;
     }
 
@@ -94,7 +171,7 @@ static const uint8_t* _getBytes(FfxCborCursor *cursor, FfxCborType *type,
     // 24 => 0, 25 => 1, 26 => 2, 27 => 3
     count = 1 << (count - 24);
     if (count > *safe) {
-        *status = FfxCborStatusBufferOverrun;
+        *error = FfxDataErrorBufferOverrun;
         return NULL;
     }
 
@@ -117,16 +194,14 @@ static const uint8_t* _getBytes(FfxCborCursor *cursor, FfxCborType *type,
 ///////////////////////////////
 // Crawler
 
-void ffx_cbor_walk(FfxCborCursor *cursor, const uint8_t *data, size_t length) {
-    cursor->data = data;
-    cursor->length = length;
-    cursor->offset = 0;
-    cursor->containerCount = 0;
-    cursor->containerIndex = 0;
+FfxCborCursor ffx_cbor_walk(const uint8_t *data, size_t length) {
+    return (FfxCborCursor){ .data = data, .length = length };
 }
 
-void ffx_cbor_clone(FfxCborCursor *dst, FfxCborCursor *src) {
-    memmove(dst, src, sizeof(FfxCborCursor));
+FfxCborCursor ffx_cbor_clone(FfxCborCursor *cursor) {
+    FfxCborCursor result = { 0 };
+    memcpy(&result, cursor, sizeof(FfxCborCursor));
+    return result;
 }
 
 bool ffx_cbor_isDone(FfxCborCursor *cursor) {
@@ -142,174 +217,94 @@ bool ffx_cbor_checkType(FfxCborCursor *cursor, FfxCborType types) {
     return (ffx_cbor_getType(cursor) & types);
 }
 
-uint64_t ffx_cbor_getValue(FfxCborCursor *cursor, FfxCborStatus *error) {
-    if (error) {
-        if (*error) { return 0; }
-        *error = FfxCborStatusOK;
-    }
+FfxValueResult ffx_cbor_getValue(FfxCborCursor *cursor) {
+    FfxValueResult result = { 0 };
 
-    FfxCborType type = 0;
-    uint64_t value;
-    size_t safe = 0, headLen = 0;
-    FfxCborStatus status = FfxCborStatusOK;
-    const uint8_t *data = _getBytes(cursor, &type, &value, &safe, &headLen, &status);
-    if (status) {
-        if (error) { *error = status; }
-        return 0;
-    }
+    CursorInfo info = getInfo(cursor);
+    if (info.error) { return (FfxValueResult){ .error = info.error }; }
+    assert(info.data != NULL && info.type != FfxCborTypeError);
 
-    assert(data != NULL && type != FfxCborTypeError);
-
-    switch (type) {
+    switch (info.type) {
         case FfxCborTypeNull: case FfxCborTypeBoolean: case FfxCborTypeNumber:
-            return value;
+            return (FfxValueResult){ .value = info.value };
         default:
             break;
     }
 
-    if (error) { *error = FfxCborStatusInvalidOperation; }
-    return 0;
+    return (FfxValueResult){ .error = FfxDataErrorInvalidOperation };
 }
 
 // @TODO: refactor these 3 functions
 
-FfxCborData ffx_cbor_getData(FfxCborCursor *cursor, FfxCborStatus *error) {
+FfxDataResult ffx_cbor_getData(FfxCborCursor *cursor) {
 
-    FfxCborData result = { .bytes = NULL, .length = 0 };
+    FfxDataResult result = { 0 };
 
-    if (error) {
-        if (*error) { return result; }
-        *error = FfxCborStatusOK;
-    }
+    CursorInfo info = getInfo(cursor);
+    if (info.error) { return (FfxDataResult){ .error = info.error }; }
+    assert(info.data != NULL && info.type != FfxCborTypeError);
 
-    FfxCborType type = 0;
-    uint64_t value;
-    size_t safe = 0, headLen = 0;
-    FfxCborStatus status = FfxCborStatusOK;
-    const uint8_t *data = _getBytes(cursor, &type, &value, &safe, &headLen, &status);
-    if (status) {
-        if (error) { *error = status; }
-        return result;
-    }
-
-    assert(data != NULL && type != FfxCborTypeError);
-
-    if (type != FfxCborTypeData && type != FfxCborTypeString) {
-        if (error) { *error = FfxCborStatusInvalidOperation; }
-        return result;
+    if (info.type != FfxCborTypeData && info.type != FfxCborTypeString) {
+        return (FfxDataResult){ .error = FfxDataErrorInvalidOperation };
     }
 
     // Would read beyond our data
-    if (value > safe) {
-        if (error) { *error = FfxCborStatusBufferOverrun; }
-        return result;
+    if (info.value > info.safe) {
+        return (FfxDataResult){ .error = FfxDataErrorBufferOverrun };
     }
 
     // Only support lengths up to 24 bits
-    if (value >= MAX_LENGTH) {
-        if (error) { *error = FfxCborStatusOverflow; }
-        return result;
+    if (info.value >= MAX_LENGTH) {
+        return (FfxDataResult){ .error = FfxDataErrorOverflow };
     }
 
-    result.bytes = data;
-    result.length = value;
-
-    return result;
+    return (FfxDataResult){ .bytes = info.data, .length = info.value };
 }
-/*
-FfxCborStatus ffx_cbor_copyData(FfxCborCursor *cursor, uint8_t *output, size_t length) {
-    FfxCborType type = 0;
-    uint64_t value;
-    size_t safe = 0, headLen = 0;
-    FfxCborStatus status = FfxCborStatusOK;
-    const uint8_t *data = _getBytes(cursor, &type, &value, &safe, &headLen, &status);
-    if (data == NULL) { return status; }
 
-    if (type != FfxCborTypeData && type != FfxCborTypeString) {
-        return FfxCborStatusInvalidOperation;
-    }
+FfxSizeResult ffx_cbor_getLength(FfxCborCursor *cursor) {
 
-    // Would read beyond our data
-    if (value > safe) { return FfxCborStatusBufferOverrun; }
+    CursorInfo info = getInfo(cursor);
+    if (info.error) { return (FfxSizeResult){ .error = info.error }; }
+    assert(info.data != NULL && info.type != FfxCborTypeError);
 
     // Only support lengths up to 16 bits
-    if (value > 0xffffffff) { return FfxCborStatusOverflow; }
-
-    status = FfxCborStatusOK;
-
-    // Not enough space; copy what we can, but mark as truncated
-    if (length < value) {
-        status = FfxCborStatusTruncated;
-        value = length;
+    if (info.value > MAX_LENGTH) {
+        return (FfxSizeResult){ .error = FfxDataErrorOverflow };
     }
 
-    //for (int i = 0; i < value; i++) { output[i] = data[i]; }
-    memmove(output, data, value);
-
-    return status;
-}
-*/
-
-size_t ffx_cbor_getLength(FfxCborCursor *cursor, FfxCborStatus *error) {
-    if (error) {
-        if (*error) { return 0; }
-        *error = FfxCborStatusOK;
-    }
-
-    FfxCborType type = 0;
-    uint64_t value;
-    size_t safe = 0, headLen = 0;;
-    FfxCborStatus status = FfxCborStatusOK;
-    const uint8_t *data = _getBytes(cursor, &type, &value, &safe, &headLen, &status);
-    if (status) {
-        if (error) { *error = status; }
-        return 0;
-    }
-
-    assert(data != NULL && type != FfxCborTypeError);
-
-    // Only support lengths up to 16 bits
-    if (value > MAX_LENGTH) {
-        if (error) { *error = FfxCborStatusOverflow; }
-        return 0;
-    }
-
-    switch (type) {
+    switch (info.type) {
         case FfxCborTypeData: case FfxCborTypeString:
         case FfxCborTypeArray: case FfxCborTypeMap:
-            return value;
+            return (FfxSizeResult){ .value = info.value };
         default:
             break;
     }
 
-    if (error) { *error = FfxCborStatusInvalidOperation; }
-    return 0;
+    return (FfxSizeResult){ .error = FfxDataErrorInvalidOperation };
 }
 
-bool ffx_cbor_checkLength(FfxCborCursor *cursor, size_t length) {
-    FfxCborStatus error = FfxCborStatusOK;
-    size_t l = ffx_cbor_getLength(cursor, &error);
-    if (error) { return 0; }
-    return (l == length);
+bool ffx_cbor_checkLength(FfxCborCursor *cursor, FfxCborType types,
+  size_t length) {
+
+    if (cursor->error) { return false; }
+    if (!ffx_cbor_checkType(cursor, types)) { return false; }
+    FfxSizeResult result = ffx_cbor_getLength(cursor);
+    if (result.error) { return false; }
+    return (result.value == length);
 }
 
-
-bool _ffx_cbor_next(FfxCborCursor *cursor, FfxCborStatus *error) {
+// Make fully private?
+bool _ffx_cbor_next(FfxCborCursor *cursor, FfxDataError *error) {
     if (cursor->offset >= cursor->length) { return false; }
 
-    FfxCborType type = 0;
-    uint64_t value;
-    size_t safe = 0, headLen = 0;
-    FfxCborStatus status = FfxCborStatusOK;
-    const uint8_t *data = _getBytes(cursor, &type, &value, &safe, &headLen, &status);
-    if (status) {
-        if (error) { *error = status; }
+    CursorInfo info = getInfo(cursor);
+    if (info.error) {
+        if (error) { *error = info.error; }
         return false;
     }
+    assert(info.data != NULL && info.type != FfxCborTypeError);
 
-    assert(data != NULL);
-
-    switch (type) {
+    switch (info.type) {
         case FfxCborTypeError:
             assert(0);
 
@@ -318,155 +313,142 @@ bool _ffx_cbor_next(FfxCborCursor *cursor, FfxCborStatus *error) {
             // ... falls-through ...
 
         case FfxCborTypeNull: case FfxCborTypeBoolean: case FfxCborTypeNumber:
-            cursor->offset += headLen;
+            cursor->offset += info.headerSize;
             break;
 
         case FfxCborTypeData: case FfxCborTypeString:
-            cursor->offset += headLen + value;
+            cursor->offset += info.headerSize + info.value;
             break;
     }
 
     return true;
 }
 
-static bool firstValue(FfxCborCursor *cursor, FfxCborCursor *key,
-  FfxCborStatus *error) {
+static bool firstValue(FfxCborIterator *iter) {
 
-    if (*error) { return false; }
-    *error = FfxCborStatusOK;
-
-    FfxCborType type = 0;
-    uint64_t value;
-    size_t safe = 0, headLen = 0;
-    FfxCborStatus status = FfxCborStatusOK;
-    const uint8_t *data = _getBytes(cursor, &type, &value, &safe, &headLen, &status);
-    if (status) {
-        *error = status;
+    CursorInfo info = getInfo(&iter->container);
+    if (info.error) {
+        iter->error = info.error;
         return false;
     }
-
-    assert(data != NULL && type != FfxCborTypeError);
+    assert(info.data != NULL && info.type != FfxCborTypeError);
 
     // Done; first value of an empty set
-    if (value == 0) { return false; }
+    if (info.value == 0) { return false; }
 
-    if (value > MAX_LENGTH) {
-        if (error) { *error = FfxCborStatusOverflow; }
+    if (info.value > MAX_LENGTH) {
+        iter->error = FfxDataErrorOverflow;
         return false;
     }
 
-    FfxCborCursor follow;
-    ffx_cbor_clone(&follow, cursor);
+    FfxCborCursor follow = ffx_cbor_clone(&iter->container);
 
-    if (type == FfxCborTypeArray) {
-        if (!_ffx_cbor_next(&follow, error)) { return false; }
-        follow.containerCount = value;
-        follow.containerIndex = 0;
-        ffx_cbor_clone(cursor, &follow);
+    if (info.type == FfxCborTypeArray) {
+        if (!_ffx_cbor_next(&follow, &iter->error)) { return false; }
+
+        iter->containerCount = info.value;
+        iter->containerIndex = 0;
+        iter->child = ffx_cbor_clone(&follow);
+        iter->key = (FfxCborCursor){ .error = FfxDataErrorNotFound };
         return true;
     }
 
-    if (type == FfxCborTypeMap) {
-        if (!_ffx_cbor_next(&follow, error)) { return false; }
-        if (key) {
-            ffx_cbor_clone(key, &follow);
-            key->containerCount = 0;
-            key->containerIndex = 0;
+    if (info.type == FfxCborTypeMap) {
+        if (!_ffx_cbor_next(&follow, &iter->error)) { return false; }
+
+        if (!ffx_cbor_checkType(&follow, FfxCborTypeString)) {
+            iter->error = FfxDataErrorBadData;
+            return false;
         }
-        if (!_ffx_cbor_next(&follow, error)) { return false; }
-        follow.containerCount = -value;
-        follow.containerIndex = 0;
-        ffx_cbor_clone(cursor, &follow);
+        iter->key = ffx_cbor_clone(&follow);
+
+        if (!_ffx_cbor_next(&follow, &iter->error)) { return false; }
+        iter->containerCount = info.value;
+        iter->containerIndex = 0;
+        iter->child = ffx_cbor_clone(&follow);
         return true;
     }
 
-    *error = FfxCborStatusInvalidOperation;
+    iter->error = FfxDataErrorInvalidOperation;
     return false;
 }
 
-// @TODO: on error shold we reset the key?
-static bool nextValue(FfxCborCursor *cursor, FfxCborCursor *key,
-  FfxCborStatus *error) {
+static bool nextValue(FfxCborIterator *iter) {
 
-    if (*error) { return false; }
-
-    bool hasKey = false;
-    int32_t count = cursor->containerCount;
+    bool hasKey = (ffx_cbor_getType(&iter->container) == FfxCborTypeMap);
+    int32_t count = iter->containerCount;
 
     if (count == 0) {
-        if (error) { *error = FfxCborStatusInvalidOperation; }
+        iter->error = FfxDataErrorInvalidOperation;
         return false;
     }
 
-    if (count < 0) {
-        hasKey = true;
-        count *= -1;
-    }
+    if (iter->containerIndex + 1 == count) { return false; }
+    iter->containerIndex++;
 
-    if (cursor->containerIndex + 1 == count) { return false; }
-    cursor->containerIndex++;
-
-    FfxCborCursor follow;
-    ffx_cbor_clone(&follow, cursor);
+    FfxCborCursor follow = ffx_cbor_clone(&iter->child);
 
     int32_t skip = 1;
     while (skip != 0) {
         FfxCborType type = ffx_cbor_getType(&follow);
         if (type == FfxCborTypeArray) {
-            size_t length = ffx_cbor_getLength(&follow, error);
-            if (*error) { return false; }
-            skip += length;
+            FfxSizeResult result = ffx_cbor_getLength(&follow);
+            if (result.error) { return false; }
+            skip += result.value;
         } else if (type == FfxCborTypeMap) {
-            size_t length = ffx_cbor_getLength(&follow, error);
-            if (*error) { return false; }
-            skip += 2 * length;
+            FfxSizeResult result = ffx_cbor_getLength(&follow);
+            if (result.error) { return false; }
+            skip += 2 * result.value;
         }
 
-        if (!_ffx_cbor_next(&follow, error)) { return false; }
+        if (!_ffx_cbor_next(&follow, &iter->error)) { return false; }
 
         skip--;
     }
 
     if (hasKey) {
-        if (key) {
-            ffx_cbor_clone(key, &follow);
-            key->containerCount = 0;
-            key->containerIndex = 0;
+        if (!ffx_cbor_checkType(&follow, FfxCborTypeString)) {
+            iter->error = FfxDataErrorBadData;
+            return false;
         }
-        if (!_ffx_cbor_next(&follow, error)) { return false; }
+        iter->key = ffx_cbor_clone(&follow);
+
+        if (!_ffx_cbor_next(&follow, &iter->error)) { return false; }
+    } else {
+        iter->key = (FfxCborCursor){ .error = FfxDataErrorNotFound };
     }
 
-    ffx_cbor_clone(cursor, &follow);
+    iter->child = ffx_cbor_clone(&follow);
 
     return true;
 }
 
-bool ffx_cbor_iterate(FfxCborCursor *cursor, FfxCborCursor *key,
-  FfxCborStatus *error) {
-
-    // An error MUST be passed in
-    if (error == NULL) { return false; }
-
-    if (*error == FfxCborStatusBeginIterator) {
-        *error = FfxCborStatusOK;
-        return firstValue(cursor, key, error);
-
-    } else if (*error) {
-        // Existing error!
-        return false;
-
+FfxCborIterator ffx_cbor_iterate(FfxCborCursor *container) {
+    if (container->error) {
+        return (FfxCborIterator){ .error = container->error };
     }
 
-    return nextValue(cursor, key, error);
+    return (FfxCborIterator){
+        .container = *container,
+        .containerIndex = FIRST_ITER
+    };
+}
+
+bool ffx_cbor_nextChild(FfxCborIterator *iter) {
+    if (iter->error) { return false; }
+
+    if (iter->containerIndex == FIRST_ITER) { return firstValue(iter); }
+
+    return nextValue(iter);
 }
 
 static bool _keyCompare(const char *key, FfxCborCursor *cursor,
-  FfxCborStatus *error) {
+  FfxDataError *error) {
 
     size_t length = strlen(key);
 
-    FfxCborData data = ffx_cbor_getData(cursor, error);
-    if (*error) { return false; }
+    FfxDataResult data = ffx_cbor_getData(cursor);
+    if (data.error) { return false; }
 
     if (length != data.length) { return false; }
 
@@ -477,88 +459,58 @@ static bool _keyCompare(const char *key, FfxCborCursor *cursor,
     return true;
 }
 
-bool ffx_cbor_followKey(FfxCborCursor *cursor, const char *key,
-  FfxCborStatus *error) {
-
-    if (error) {
-        if (*error) { return false; }
-        *error = FfxCborStatusOK;
-    }
+FfxCborCursor ffx_cbor_followKey(FfxCborCursor *cursor, const char *key) {
 
     if (!ffx_cbor_checkType(cursor, FfxCborTypeMap)) {
-        if (error) { *error = FfxCborStatusInvalidOperation; }
-        return false;
+        return (FfxCborCursor){ .error = FfxDataErrorInvalidOperation };
     }
 
-    FfxCborCursor follow, followKey;
-    ffx_cbor_clone(&follow, cursor);
-
-    FfxCborStatus status = FfxCborStatusBeginIterator;
-    while (ffx_cbor_iterate(&follow, &followKey, &status)) {
-        if (!ffx_cbor_checkType(&followKey, FfxCborTypeString)) {
-            if (error) { *error = FfxCborStatusBadData; }
-            return false;
-        }
-
-        if (_keyCompare(key, &followKey, &status)) {
-            ffx_cbor_clone(cursor, &follow);
-            return true;
-        }
+    FfxCborIterator iter = ffx_cbor_iterate(cursor);
+    while (ffx_cbor_nextChild(&iter)) {
+        if (iter.error) { break; }
+        if (_keyCompare(key, &iter.key, &iter.error)) { return iter.child; }
     }
 
-    if (status && error) { *error = status; }
+    if (iter.error) { return (FfxCborCursor){ .error = iter.error }; }
 
-    return false;
+    return (FfxCborCursor){ .error = FfxDataErrorNotFound };
 }
 
-bool ffx_cbor_followIndex(FfxCborCursor *cursor, size_t index,
-  FfxCborStatus *error) {
-
-    if (error) {
-        if (*error) { return false; }
-        *error = FfxCborStatusOK;
-    }
+FfxCborCursor ffx_cbor_followIndex(FfxCborCursor *cursor, size_t index) {
 
     if (!ffx_cbor_checkType(cursor, FfxCborTypeArray | FfxCborTypeMap)) {
-        if (error) { *error = FfxCborStatusInvalidOperation; }
-        return false;
+        return (FfxCborCursor){ .error = FfxDataErrorInvalidOperation };
     }
-
-    FfxCborCursor follow;
-    ffx_cbor_clone(&follow, cursor);
 
     size_t i = 0;
 
-    FfxCborStatus status = FfxCborStatusBeginIterator;
-    while (ffx_cbor_iterate(&follow, NULL, &status)) {
-        if (i == index) {
-            ffx_cbor_clone(cursor, &follow);
-            return true;
+    FfxCborIterator iter = ffx_cbor_iterate(cursor);
+    while (ffx_cbor_nextChild(&iter)) {
+        if (iter.error) {
+            return (FfxCborCursor){ .error = iter.error };
         }
+        if (i == index) { return iter.child; }
         i++;
     }
 
-
-    return false;
+    return (FfxCborCursor){ .error = FfxDataErrorNotFound };
 }
 
 static void _dump(FfxCborCursor *cursor) {
     FfxCborType type = _getType(cursor->data[cursor->offset]);
 
-    FfxCborStatus status = FfxCborStatusOK;
-
     switch(type) {
         case FfxCborTypeNumber: {
-            uint64_t value = ffx_cbor_getValue(cursor, &status);
-            if (status) { break; }
+            FfxValueResult result = ffx_cbor_getValue(cursor);
+            if (result.error) { break; }
 
-            printf("%lld", value);
+            printf("%lld", result.value);
             break;
         }
 
         case FfxCborTypeString: {
-            FfxCborData data = ffx_cbor_getData(cursor, &status);
-            if (status) { break; }
+            FfxDataResult data = ffx_cbor_getData(cursor);
+            if (data.error) { break; }
 
             printf("\"");
             for (int i = 0; i < data.length; i++) {
@@ -578,8 +530,8 @@ static void _dump(FfxCborCursor *cursor) {
         }
 
         case FfxCborTypeData: {
-            FfxCborData data = ffx_cbor_getData(cursor, &status);
-            if (status) { break; }
+            FfxDataResult data = ffx_cbor_getData(cursor);
+            if (data.error) { break; }
 
             printf("0x");
             for (int i = 0; i < data.length; i++) {
@@ -593,17 +545,17 @@ static void _dump(FfxCborCursor *cursor) {
 
             bool first = true;
 
-            FfxCborCursor follow;
-            ffx_cbor_clone(&follow, cursor);
-
-            FfxCborStatus status = FfxCborStatusBeginIterator;
-            while (ffx_cbor_iterate(&follow, NULL, &status)) {
+            FfxCborIterator iter = ffx_cbor_iterate(cursor);
+            while (ffx_cbor_nextChild(&iter)) {
                 if (!first) { printf(", "); }
                 first = false;
-                _dump(&follow);
+                _dump(&iter.child);
             }
 
-            if (status) { break; }
+            if (iter.child.error) {
+                printf("<ERROR status=%d>", iter.child.error);
+                break;
+            }
 
             if (!first) { printf(" "); }
             printf("]");
@@ -615,19 +567,19 @@ static void _dump(FfxCborCursor *cursor) {
 
             bool first = true;
 
-            FfxCborCursor follow, followKey;
-            ffx_cbor_clone(&follow, cursor);
-
-            FfxCborStatus status = FfxCborStatusBeginIterator;
-            while (ffx_cbor_iterate(&follow, &followKey, &status)) {
+            FfxCborIterator iter = ffx_cbor_iterate(cursor);
+            while (ffx_cbor_nextChild(&iter)) {
                 if (!first) { printf(", "); }
                 first = false;
-                _dump(&followKey);
+                _dump(&iter.key);
                 printf(": ");
-                _dump(&follow);
+                _dump(&iter.child);
             }
 
-            if (status) { break; }
+            if (iter.child.error) {
+                printf("<ERROR status=%d>", iter.child.error);
+                break;
+            }
 
             if (!first) { printf(" "); }
             printf(" }");
@@ -635,10 +587,10 @@ static void _dump(FfxCborCursor *cursor) {
         }
 
         case FfxCborTypeBoolean: {
-            uint64_t value = ffx_cbor_getValue(cursor, &status);
-            if (status) { break; }
+            FfxValueResult result = ffx_cbor_getValue(cursor);
+            if (result.error) { break; }
 
-            printf("%s", value ? "true": "false");
+            printf("%s", result.value ? "true": "false");
             break;
         }
 
@@ -647,12 +599,8 @@ static void _dump(FfxCborCursor *cursor) {
             break;
 
         default:
-            printf("ERROR");
-    }
-
-    // @TODO: Fill this in more
-    if (status) {
-        printf("<ERROR>");
+            printf("<ERROR type=%d>", type);
+            return;
     }
 }
 
@@ -664,15 +612,18 @@ void ffx_cbor_dump(FfxCborCursor *cursor) {
 ///////////////////////////////
 // Builder - utils
 
-static FfxCborStatus _appendHeader(FfxCborBuilder *builder, FfxCborType type,
+static bool _appendHeader(FfxCborBuilder *cbor, FfxCborType type,
   uint64_t value) {
 
-    size_t remaining = builder->length - builder->offset;
+    if (cbor->error) { return false; }
 
     if (value < 23) {
-        if (remaining < 1) { return FfxCborStatusBufferOverrun; }
-        builder->data[builder->offset++] = (type << 5) | value;
-        return FfxCborStatusOK;
+        if (cbor->length < cbor->offset + 1) {
+            cbor->error = FfxDataErrorBufferOverrun;
+            return false;
+        }
+        cbor->data[cbor->offset++] = (type << 5) | value;
+        return true;
     }
 
     // Convert to 8 bytes
@@ -689,138 +640,167 @@ static FfxCborStatus _appendHeader(FfxCborBuilder *builder, FfxCborType type,
     uint8_t count = counts[inset];
     inset = 8 - (1 << (count - 24));
 
-    if (remaining < 1 + (8 - inset)) { return FfxCborStatusBufferOverrun; }
-
-    size_t offset = builder->offset;
-    builder->data[offset++] = (type << 5) | count;
-    for (int i = inset; i < 8; i++) {
-        builder->data[offset++] = bytes[i];
+    if (cbor->length < cbor->offset + 1 + (8 - inset)) {
+        cbor->error = FfxDataErrorBufferOverrun;
+        return false;
     }
-    builder->offset = offset;
 
-    return FfxCborStatusOK;
+    size_t offset = cbor->offset;
+    cbor->data[offset++] = (type << 5) | count;
+    for (int i = inset; i < 8; i++) {
+        cbor->data[offset++] = bytes[i];
+    }
+    cbor->offset = offset;
+
+    return true;
 }
 
 
 ///////////////////////////////
 // Builder
 
-void ffx_cbor_build(FfxCborBuilder *builder, uint8_t *data, size_t length) {
-    builder->data = data;
-    builder->length = length;
-    builder->offset = 0;
+FfxCborBuilder ffx_cbor_build(uint8_t *data, size_t length) {
+    return (FfxCborBuilder){ .data = data, .length = length };
 }
 
-size_t ffx_cbor_getBuildLength(FfxCborBuilder *builder) {
-    return builder->offset;
+size_t ffx_cbor_getBuildLength(FfxCborBuilder *cbor) {
+    return cbor->offset;
 }
 
-FfxCborStatus ffx_cbor_appendBoolean(FfxCborBuilder *builder, bool value) {
-    size_t remaining = builder->length - builder->offset;
-    if (remaining < 1) { return FfxCborStatusBufferOverrun; }
-    size_t offset = builder->offset;
-    builder->data[offset++] = (7 << 5) | (value ? 21: 20);
-    builder->offset = offset;
-    return FfxCborStatusOK;
+bool ffx_cbor_appendBoolean(FfxCborBuilder *cbor, bool value) {
+    if (cbor->error) { return false; }
+
+    size_t remaining = cbor->length - cbor->offset;
+    if (cbor->length < cbor->offset + 1) {
+        cbor->error = FfxDataErrorBufferOverrun;
+        return false;
+    }
+
+    size_t offset = cbor->offset;
+    cbor->data[offset++] = (7 << 5) | (value ? 21: 20);
+    cbor->offset = offset;
+
+    return true;
 }
 
-FfxCborStatus ffx_cbor_appendNull(FfxCborBuilder *builder) {
-    size_t remaining = builder->length - builder->offset;
-    if (remaining < 1) { return FfxCborStatusBufferOverrun; }
-    size_t offset = builder->offset;
-    builder->data[offset++] = (7 << 5) | 22;
-    builder->offset = offset;
-    return FfxCborStatusOK;
+bool ffx_cbor_appendNull(FfxCborBuilder *cbor) {
+    if (cbor->error) { return false; }
+
+    if (cbor->length < cbor->offset + 1) {
+        cbor->error = FfxDataErrorBufferOverrun;
+        return false;
+    }
+
+    size_t offset = cbor->offset;
+    cbor->data[offset++] = (7 << 5) | 22;
+    cbor->offset = offset;
+
+    return true;
 }
 
-FfxCborStatus ffx_cbor_appendNumber(FfxCborBuilder *builder, uint64_t value) {
-    return _appendHeader(builder, 0, value);
+bool ffx_cbor_appendNumber(FfxCborBuilder *cbor, uint64_t value) {
+    return _appendHeader(cbor, 0, value);
 }
 
-FfxCborStatus ffx_cbor_appendData(FfxCborBuilder *builder, uint8_t *data, size_t length) {
-    FfxCborStatus status = _appendHeader(builder, 2, length);
-    if (status) { return status; }
+bool ffx_cbor_appendData(FfxCborBuilder *cbor, uint8_t *data, size_t length) {
+    if (!_appendHeader(cbor, 2, length)) { return false; }
 
-    size_t remaining = builder->length - builder->offset;
-    if (remaining < length) { return FfxCborStatusBufferOverrun; }
+    if (cbor->length < cbor->offset + length) {
+        cbor->error = FfxDataErrorBufferOverrun;
+        return false;
+    }
 
-    memmove(&builder->data[builder->offset], data, length);
-    builder->offset += length;
+    memmove(&cbor->data[cbor->offset], data, length);
+    cbor->offset += length;
 
-    return FfxCborStatusOK;
+    return FfxDataErrorNone;
 }
 
-FfxCborStatus ffx_cbor_appendString(FfxCborBuilder *builder, char* str) {
+bool ffx_cbor_appendString(FfxCborBuilder *cbor, char* str) {
+    if (cbor->error) { return false; }
+
     size_t length = strlen(str);
 
-    FfxCborStatus status = _appendHeader(builder, 3, length);
-    if (status) { return status; }
+    if (!_appendHeader(cbor, 3, length)) { return false; }
 
-    size_t remaining = builder->length - builder->offset;
-    if (remaining < length) { return FfxCborStatusBufferOverrun; }
+    if (cbor->length - cbor->offset < length) {
+        cbor->error = FfxDataErrorBufferOverrun;
+        return false;
+    }
 
-    memmove(&builder->data[builder->offset], str, length);
-    builder->offset += length;
+    memmove(&cbor->data[cbor->offset], str, length);
+    cbor->offset += length;
 
-    return FfxCborStatusOK;
+    return true;
 }
 
-FfxCborStatus ffx_cbor_appendArray(FfxCborBuilder *builder, size_t count) {
-    return _appendHeader(builder, 4, count);
+bool ffx_cbor_appendArray(FfxCborBuilder *cbor, size_t count) {
+    return _appendHeader(cbor, 4, count);
 }
 
-FfxCborStatus ffx_cbor_appendMap(FfxCborBuilder *builder, size_t count) {
-    return _appendHeader(builder, 5, count);
+bool ffx_cbor_appendMap(FfxCborBuilder *cbor, size_t count) {
+    return _appendHeader(cbor, 5, count);
 }
 
-FfxCborStatus ffx_cbor_appendArrayMutable(FfxCborBuilder *builder, FfxCborBuilderTag *tag) {
-    size_t remaining = builder->length - builder->offset;
-    if (remaining < 3) { return FfxCborStatusBufferOverrun; }
+FfxCborTag ffx_cbor_appendArrayMutable(FfxCborBuilder *cbor) {
+    if (cbor->error) { return 0; }
 
-    builder->data[builder->offset++] = (4 << 5) | 25;
+    if (cbor->length < cbor->offset + 3) { // @TODO: Should we alloc 4 bytes?
+        cbor->error = FfxDataErrorBufferOverrun;
+        return 0;
+    }
 
-    *tag = builder->offset;
+    cbor->data[cbor->offset++] = (4 << 5) | 25;
 
-    builder->data[builder->offset++] = 0;
-    builder->data[builder->offset++] = 0;
+    FfxCborTag tag = cbor->offset;
 
-    return FfxCborStatusOK;
+    cbor->data[cbor->offset++] = 0;
+    cbor->data[cbor->offset++] = 0;
+
+    return tag;
 }
 
-FfxCborStatus ffx_cbor_appendMapMutable(FfxCborBuilder *builder, FfxCborBuilderTag *tag) {
-    size_t remaining = builder->length - builder->offset;
-    if (remaining < 3) { return FfxCborStatusBufferOverrun; }
+FfxCborTag ffx_cbor_appendMapMutable(FfxCborBuilder *cbor) {
+    if (cbor->error) { return 0; }
 
-    builder->data[builder->offset++] = (5 << 5) | 25;
+    if (cbor->length < cbor->offset + 3) {  // @TODO: Use 4 bytes?
+        cbor->error = FfxDataErrorBufferOverrun;
+        return 0;
+    }
 
-    *tag = builder->offset;
+    cbor->data[cbor->offset++] = (5 << 5) | 25;
 
-    builder->data[builder->offset++] = 0;
-    builder->data[builder->offset++] = 0;
+    FfxCborTag tag = cbor->offset;
 
-    return FfxCborStatusOK;
+    cbor->data[cbor->offset++] = 0;
+    cbor->data[cbor->offset++] = 0;
+
+    return tag;
 }
 
-void ffx_cbor_adjustCount(FfxCborBuilder *builder, FfxCborBuilderTag tag,
-  uint16_t count) {
-    builder->data[tag++] = (count >> 16) & 0xff;
-    builder->data[tag++] = count & 0xff;
+void ffx_cbor_adjustCount(FfxCborBuilder *cbor, FfxCborTag tag, size_t count) {
+    if (cbor->error) { return; }
+
+    cbor->data[tag++] = (count >> 16) & 0xff;
+    cbor->data[tag++] = count & 0xff;
 }
 
-FfxCborStatus ffx_cbor_appendCborRaw(FfxCborBuilder *builder, uint8_t *data,
+bool ffx_cbor_appendCborRaw(FfxCborBuilder *cbor, uint8_t *data,
   size_t length) {
+    if (cbor->error) { return 0; }
 
-    size_t remaining = builder->length - builder->offset;
-    if (remaining < length) { return FfxCborStatusBufferOverrun; }
+    if (cbor->length < cbor->offset + length) {
+        cbor->error = FfxDataErrorBufferOverrun;
+        return false;
+    }
 
-    size_t offset = builder->offset;
-    memmove(&builder->data[offset], data, length);
-    builder->offset = offset + length;
+    size_t offset = cbor->offset;
+    memmove(&cbor->data[offset], data, length);
+    cbor->offset = offset + length;
 
-    return FfxCborStatusOK;
+    return FfxDataErrorNone;
 }
 
-FfxCborStatus ffx_cbor_appendCborBuilder(FfxCborBuilder *dst, FfxCborBuilder *src) {
+bool ffx_cbor_appendCborBuilder(FfxCborBuilder *dst, FfxCborBuilder *src) {
     return ffx_cbor_appendCborRaw(dst, src->data, src->offset);
 }
-

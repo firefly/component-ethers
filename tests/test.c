@@ -187,20 +187,19 @@ int runTestTxs(const char* name, const uint8_t *privkey, FfxCborCursor *tx,
   const uint8_t *rlpSigned, size_t rlpSignedLength) {
 
     uint8_t bytes[1024];
+    FfxTx result = ffx_tx_serializeUnsigned(tx, bytes, sizeof(bytes));
 
-    size_t length = sizeof(bytes);
-    FfxTxStatus status = ffx_tx_serializeUnsigned(tx, bytes, &length);
-
-    if (status) {
-        printf("Failed to serialize unsigned tx: status=%d\n", status);
+    if (result.status) {
+        printf("Failed to serialize unsigned tx: status=%d\n", result.status);
         ffx_cbor_dump(tx);
         return 1;
     }
 
-    if (length != rlpUnsignedLength || cmpbuf(bytes, rlpUnsigned, length)) {
+    if (result.rlp.length != rlpUnsignedLength ||
+      cmpbuf(result.rlp.bytes, rlpUnsigned, rlpUnsignedLength)) {
         printf("Unsigned TX RLP did not match\n");
         ffx_cbor_dump(tx);
-        dumpBuffer("Actual:   ", bytes, length);
+        dumpBuffer("Actual:   ", result.rlp.bytes, result.rlp.length);
         dumpBuffer("Expected: ", rlpUnsigned, rlpUnsignedLength);
         return 1;
     }
@@ -217,74 +216,67 @@ int runTestTxs(const char* name, const uint8_t *privkey, FfxCborCursor *tx,
 #define READ_STRING(NAME,MAXSIZE) \
     char (NAME)[MAXSIZE] = { 0 }; \
     { \
-        FfxCborCursor test; \
-        ffx_cbor_clone(&test, &cursor); \
-        if (!ffx_cbor_followKey(&test, #NAME, &status)) { \
+        FfxCborCursor child = ffx_cbor_followKey(&cursor, #NAME); \
+        if (child.error) { \
             printf("BAD FOLLOW STRING: " #NAME "\n"); break; \
         } \
-        FfxCborData data = ffx_cbor_getData(&test, &status); \
-        if (status) { printf("BAD COPY: " #NAME "\n"); break; } \
+        FfxDataResult data = ffx_cbor_getData(&child); \
+        if (data.error) { printf("BAD COPY: " #NAME "\n"); break; } \
         memcpy((NAME), data.bytes, MIN((MAXSIZE) - 1, data.length)); \
     }
 
 
 #define READ_DATA(NAME) \
-    FfxCborData NAME = { 0 }; \
+    FfxDataResult NAME = { 0 }; \
     { \
-        FfxCborCursor test; \
-        ffx_cbor_clone(&test, &cursor); \
-        if (!ffx_cbor_followKey(&test, #NAME, &status)) { \
+        FfxCborCursor child = ffx_cbor_followKey(&cursor, #NAME); \
+        if (child.error) { \
             printf("BAD FOLLOW DATA: key=" #NAME "\n"); break; \
         } \
-        NAME = ffx_cbor_getData(&test, &status); \
-        if (status) { printf("BAD GET DATA: " #NAME "\n"); break; } \
+        (NAME) = ffx_cbor_getData(&child); \
+        if ((NAME).error) { printf("BAD GET DATA: " #NAME "\n"); break; } \
     }
 
 #define READ_VALUE(NAME) \
     uint64_t NAME = 0;  \
     { \
-        FfxCborCursor test; \
-        ffx_cbor_clone(&test, &cursor); \
-        if (!ffx_cbor_followKey(&test, #NAME, &status)) { \
+        FfxCborCursor child = ffx_cbor_followKey(&cursor, #NAME); \
+        if (child.error) { \
             printf("BAD FOLLOW VALUE: " #NAME "\n"); break; \
         } \
-        NAME = ffx_cbor_getValue(&test, &status); \
-        if (status) { printf("BAD GET VALUE: " #NAME "\n"); break; } \
+        FfxValueResult result = ffx_cbor_getValue(&child); \
+        if (result.error) { printf("BAD GET VALUE: " #NAME "\n"); break; } \
+        NAME = result.value; \
     }
 
 
 #define OPEN_ARRAY() \
     { \
-        FfxCborCursor store; \
-        ffx_cbor_clone(&store, &cursor); \
-        status = FfxCborStatusBeginIterator; \
-        while (ffx_cbor_iterate(&cursor, NULL, &status)) {
+        FfxCborIterator iter = ffx_cbor_iterate(&cursor); \
+        while (ffx_cbor_nextChild(&iter)) { \
+            FfxCborCursor cursor = iter.child;
 
 #define CLOSE_ARRAY() \
         } \
-        if (status) { printf("status=%d\n", status); } \
-        ffx_cbor_clone(&cursor, &store); \
+        if (iter.error) { printf("status=%d\n", iter.error); } \
     }
 
 #define OPEN_AND_READ_ARRAY(NAME) \
     { \
-        FfxCborCursor store; \
-        ffx_cbor_clone(&store, &cursor); \
-        if (!ffx_cbor_followKey(&cursor, #NAME, &status)) { \
-            printf("BAD FOLLOW ARRAY\n"); break; \
-        } \
-        status = FfxCborStatusBeginIterator; \
-        while (ffx_cbor_iterate(&cursor, NULL, &status)) {
+        FfxCborCursor follow = ffx_cbor_followKey(&cursor, #NAME); \
+        if (follow.error) { printf("BAD FOLLOW ARRAY\n"); break; } \
+        FfxCborIterator iter = ffx_cbor_iterate(&follow); \
+        while (ffx_cbor_nextChild(&iter)) { \
+            FfxCborCursor cursor = iter.child;
 
 #define START_TESTS(NAME) \
-    FfxCborCursor cursor; \
-    ffx_cbor_walk(&cursor, tests_##NAME, sizeof(tests_##NAME)); \
-    FfxCborStatus status = FfxCborStatusOK; \
+    FfxDataError error = FfxDataErrorNone; \
+    FfxCborCursor cursor = ffx_cbor_walk(tests_##NAME, sizeof(tests_##NAME)); \
     size_t countPass = 0, countFail = 0, countSkip = 0;
 
 #define END_TESTS(NAME) \
-    if (status) { \
-        printf("CBOR Error: status=%d test=" #NAME "\n", status); \
+    if (error) { \
+        printf("CBOR Error: status=%d test=" #NAME "\n", error); \
         countFail++; \
     } \
     printf(#NAME ": pass=%zu fail=%zu skip=%zu\n", countPass, countFail, countSkip); \
@@ -453,10 +445,9 @@ int test_mnemonics() {
                         }
 
                         OPEN_AND_READ_ARRAY(path)
-                            uint64_t index = ffx_cbor_getValue(&cursor,
-                              &status);
-                            if (status) { break; }
-                            ffx_hdnode_deriveChild(&node, index);
+                            FfxValueResult result = ffx_cbor_getValue(&cursor);
+                            if (result.error) { break; }
+                            ffx_hdnode_deriveChild(&node, result.value);
                         CLOSE_ARRAY()
 
                         int result = runTestMnemonicsNode(&node,
@@ -527,9 +518,8 @@ int test_transactions() {
         READ_DATA(rlpUnsigned)
         READ_DATA(rlpSigned)
 
-        FfxCborCursor tx;
-        ffx_cbor_clone(&tx, &cursor);
-        if (!ffx_cbor_followKey(&tx, "tx", &status)) { break; }
+        FfxCborCursor tx = ffx_cbor_followKey(&cursor, "tx");
+        if (tx.error) { break; }
 
 //if (!strcmp(name, "random-22")) {
 

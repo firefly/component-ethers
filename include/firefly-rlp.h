@@ -25,9 +25,28 @@ typedef enum FfxRlpStatus {
     FfxRlpStatusOK = 0,
 
     FfxRlpStatusBufferOverrun = -31,
-    FfxRlpStatusOverflow = -55
+    FfxRlpStatusOverflow = -55,
+
+    FfxRlpStatusBeginIterator = 20,
 } FfxRlpStatus;
 
+typedef enum FfxRlpType {
+    FfxRlpTypeError   = 0,
+    FfxRlpTypeData    = (1 << 5),
+    FfxRlpTypeArray   = (1 << 6)
+} FfxRlpType;
+
+typedef struct FfxRlpCursor {
+    uint8_t *data;
+    size_t offset, length;
+    size_t containerLength, containerOffset;
+} FfxRlpCursor;
+
+typedef struct FfxRlpDataResult {
+    uint8_t *bytes;
+    size_t length;
+    FfxRlpStatus status;
+} FfxRlpDataResult;
 
 typedef struct FfxRlpBuilder {
     uint8_t *data;
@@ -37,6 +56,30 @@ typedef struct FfxRlpBuilder {
 } FfxRlpBuilder;
 
 typedef size_t FfxRlpBuilderTag;
+
+
+///////////////////////////////
+// Walking
+
+void ffx_rlp_walk(FfxRlpCursor *cursor, uint8_t *data, size_t length);
+
+void ffx_rlp_clone(FfxRlpCursor *dst, FfxRlpCursor *src);
+
+FfxRlpType ffx_rlp_getType(FfxRlpCursor *cursor);
+
+size_t ffx_rlp_getLength(FfxRlpCursor *cursor);
+
+FfxRlpStatus ffx_rlp_followIndex(FfxRlpCursor *cursor, size_t index);
+
+FfxRlpDataResult ffx_rlp_getData(FfxRlpCursor *cursor, FfxRlpStatus *error);
+
+bool ffx_rlp_iterate(FfxRlpCursor *cursor, FfxRlpStatus *status);
+
+void ffx_rlp_dump(FfxRlpCursor *cursor);
+
+
+///////////////////////////////
+// Building
 
 /**
  *  Initializes a new RLP builder.
@@ -82,10 +125,6 @@ FfxRlpBuilderTag ffx_rlp_appendMutableArray(FfxRlpBuilder *builder);
 bool ffx_rlp_adjustCount(FfxRlpBuilder *builder, FfxRlpBuilderTag tag,
   size_t count);
 
-// @TODO: Future API?
-//typedef uint16_t RlpBuilderTag;
-//RlpStatus rlp_appendArrayMutable(RlpBuilder *builder, RlpBuilderTag *tag);
-//void rlp_adjustCount(RlpBuilder *builder, RlpBuilderTag tag, uint16_t count);
 
 
 #ifdef __cplusplus

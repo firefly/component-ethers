@@ -205,7 +205,7 @@ function BS(sig) {
             name, privkey: B(privateKey), sig: BS(signatureLondon),
             rlpUnsigned: B(unsignedLondon), rlpSigned: B(signedLondon),
             tx: {
-                type: 2,
+                type: BN(2),
                 chainId: BN(transaction.chainId || 0),
                 to: B(transaction.to || "0x"),
                 nonce: BN(transaction.nonce || 0),
