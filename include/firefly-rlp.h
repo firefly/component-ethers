@@ -50,7 +50,7 @@ typedef struct FfxRlpIterator {
     FfxRlpCursor child;
 
     FfxRlpCursor container;
-    size_t containerLength, containerOffset;
+    size_t _containerLength, _containerOffset;
 
     FfxDataError error;
 } FfxRlpIterator;
@@ -70,20 +70,18 @@ typedef size_t FfxRlpBuilderTag;
 
 FfxRlpCursor ffx_rlp_walk(const uint8_t *data, size_t length);
 
-FfxRlpCursor ffx_rlp_clone(const FfxRlpCursor *cursor);
+FfxRlpType ffx_rlp_getType(FfxRlpCursor cursor);
 
-FfxRlpType ffx_rlp_getType(const FfxRlpCursor *cursor);
+FfxSizeResult ffx_rlp_getLength(FfxRlpCursor cursor);
 
-FfxSizeResult ffx_rlp_getLength(const FfxRlpCursor *cursor);
+FfxRlpCursor ffx_rlp_followIndex(FfxRlpCursor cursor, size_t index);
 
-FfxRlpCursor ffx_rlp_followIndex(const FfxRlpCursor *cursor, size_t index);
+FfxDataResult ffx_rlp_getData(FfxRlpCursor cursor);
 
-FfxDataResult ffx_rlp_getData(const FfxRlpCursor *cursor);
-
-FfxRlpIterator ffx_rlp_iterate(const FfxRlpCursor *cursor);
+FfxRlpIterator ffx_rlp_iterate(FfxRlpCursor cursor);
 bool ffx_rlp_nextChild(FfxRlpIterator *iterator);
 
-void ffx_rlp_dump(const FfxRlpCursor *cursor);
+void ffx_rlp_dump(FfxRlpCursor cursor);
 
 
 ///////////////////////////////

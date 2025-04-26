@@ -182,7 +182,7 @@ int runTestMnemonics(const char* name, const char* phrase,
     return 0;
 }
 
-int runTestTxs(const char* name, const uint8_t *privkey, FfxCborCursor *tx,
+int runTestTxs(const char* name, const uint8_t *privkey, FfxCborCursor tx,
   const uint8_t *sig, const uint8_t *rlpUnsigned, size_t rlpUnsignedLength,
   const uint8_t *rlpSigned, size_t rlpSignedLength) {
 
@@ -216,11 +216,11 @@ int runTestTxs(const char* name, const uint8_t *privkey, FfxCborCursor *tx,
 #define READ_STRING(NAME,MAXSIZE) \
     char (NAME)[MAXSIZE] = { 0 }; \
     { \
-        FfxCborCursor child = ffx_cbor_followKey(&cursor, #NAME); \
+        FfxCborCursor child = ffx_cbor_followKey(cursor, #NAME); \
         if (child.error) { \
             printf("BAD FOLLOW STRING: " #NAME "\n"); break; \
         } \
-        FfxDataResult data = ffx_cbor_getData(&child); \
+        FfxDataResult data = ffx_cbor_getData(child); \
         if (data.error) { printf("BAD COPY: " #NAME "\n"); break; } \
         memcpy((NAME), data.bytes, MIN((MAXSIZE) - 1, data.length)); \
     }
@@ -229,22 +229,22 @@ int runTestTxs(const char* name, const uint8_t *privkey, FfxCborCursor *tx,
 #define READ_DATA(NAME) \
     FfxDataResult NAME = { 0 }; \
     { \
-        FfxCborCursor child = ffx_cbor_followKey(&cursor, #NAME); \
+        FfxCborCursor child = ffx_cbor_followKey(cursor, #NAME); \
         if (child.error) { \
             printf("BAD FOLLOW DATA: key=" #NAME "\n"); break; \
         } \
-        (NAME) = ffx_cbor_getData(&child); \
+        (NAME) = ffx_cbor_getData(child); \
         if ((NAME).error) { printf("BAD GET DATA: " #NAME "\n"); break; } \
     }
 
 #define READ_VALUE(NAME) \
     uint64_t NAME = 0;  \
     { \
-        FfxCborCursor child = ffx_cbor_followKey(&cursor, #NAME); \
+        FfxCborCursor child = ffx_cbor_followKey(cursor, #NAME); \
         if (child.error) { \
             printf("BAD FOLLOW VALUE: " #NAME "\n"); break; \
         } \
-        FfxValueResult result = ffx_cbor_getValue(&child); \
+        FfxValueResult result = ffx_cbor_getValue(child); \
         if (result.error) { printf("BAD GET VALUE: " #NAME "\n"); break; } \
         NAME = result.value; \
     }
@@ -252,7 +252,7 @@ int runTestTxs(const char* name, const uint8_t *privkey, FfxCborCursor *tx,
 
 #define OPEN_ARRAY() \
     { \
-        FfxCborIterator iter = ffx_cbor_iterate(&cursor); \
+        FfxCborIterator iter = ffx_cbor_iterate(cursor); \
         while (ffx_cbor_nextChild(&iter)) { \
             FfxCborCursor cursor = iter.child;
 
@@ -263,9 +263,9 @@ int runTestTxs(const char* name, const uint8_t *privkey, FfxCborCursor *tx,
 
 #define OPEN_AND_READ_ARRAY(NAME) \
     { \
-        FfxCborCursor follow = ffx_cbor_followKey(&cursor, #NAME); \
+        FfxCborCursor follow = ffx_cbor_followKey(cursor, #NAME); \
         if (follow.error) { printf("BAD FOLLOW ARRAY\n"); break; } \
-        FfxCborIterator iter = ffx_cbor_iterate(&follow); \
+        FfxCborIterator iter = ffx_cbor_iterate(follow); \
         while (ffx_cbor_nextChild(&iter)) { \
             FfxCborCursor cursor = iter.child;
 
@@ -445,7 +445,7 @@ int test_mnemonics() {
                         }
 
                         OPEN_AND_READ_ARRAY(path)
-                            FfxValueResult result = ffx_cbor_getValue(&cursor);
+                            FfxValueResult result = ffx_cbor_getValue(cursor);
                             if (result.error) { break; }
                             ffx_hdnode_deriveChild(&node, result.value);
                         CLOSE_ARRAY()
@@ -518,12 +518,12 @@ int test_transactions() {
         READ_DATA(rlpUnsigned)
         READ_DATA(rlpSigned)
 
-        FfxCborCursor tx = ffx_cbor_followKey(&cursor, "tx");
+        FfxCborCursor tx = ffx_cbor_followKey(cursor, "tx");
         if (tx.error) { break; }
 
 //if (!strcmp(name, "random-22")) {
 
-        int result = runTestTxs(name, privkey.bytes, &tx, sig.bytes,
+        int result = runTestTxs(name, privkey.bytes, tx, sig.bytes,
           rlpUnsigned.bytes, rlpUnsigned.length,
           rlpSigned.bytes, rlpSigned.length);
 

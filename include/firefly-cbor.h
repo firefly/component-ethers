@@ -1,7 +1,9 @@
 #ifndef __FIREFLY_CBOR_H__
 #define __FIREFLY_CBOR_H__
 
+
 #include "firefly-data.h"
+
 
 #ifdef __cplusplus
 extern "C" {
@@ -38,8 +40,7 @@ typedef enum FfxCborType {
  */
 typedef struct FfxCborCursor {
     const uint8_t *data;
-    size_t length;
-    size_t offset;
+    size_t offset, length;
 
     FfxDataError error;
 } FfxCborCursor;
@@ -48,18 +49,16 @@ typedef struct FfxCborIterator {
     // The current child; updated on each call to nextValue
     FfxCborCursor child;
 
-    // For Arrays, key.status = FfxDataErrorNotFound
+    // For Arrays, key.status = FfxDataErrorNotFound, for maps this
+    // is a cursor pointing to the key
     FfxCborCursor key;
-
-    // If an error occurred during iteration (which also halts iteration)
-    //FfxDataError error; use the child Cursor's error
 
     FfxDataError error;
 
     FfxCborCursor container;
 
-    size_t containerCount;
-    size_t containerIndex;
+    size_t _containerCount;
+    size_t _containerIndex;
 } FfxCborIterator;
 
 
@@ -70,19 +69,13 @@ typedef struct FfxCborIterator {
  */
 typedef struct FfxCborBuilder {
     uint8_t *data;
-    size_t length;
-    size_t offset;
+    size_t offset, length;
 
     FfxDataError error;
 } FfxCborBuilder;
 
 
-// @TODO:
-//FfxCborStatus ffx_cbor_verify(uint8_t *data, size_t *length);
-
 FfxCborCursor ffx_cbor_walk(const uint8_t *data, size_t length);
-
-FfxCborCursor ffx_cbor_clone(const FfxCborCursor *cursor);
 
 /**
  *  Validates:
@@ -91,82 +84,70 @@ FfxCborCursor ffx_cbor_clone(const FfxCborCursor *cursor);
  *    - All container lengths are a safe length
  *    - The entire contents is consumed?
  */
-FfxDataError ffx_cbor_validate(const FfxCborCursor *cursor);
-
-
-/**
- *
- *  Components
- *    - [0-9]+ => array index
- *    - [a-z_][a-z0-9-_] => map key
- *    - $ => next character is literal and a map key
- *    - :(number|string|boolean|null|data|array|map) => type must match
- *    - (<|<=|=|=>|>)[0-9]+ => array constraint; length must match
- *
- *  Path Examples:
- *    - "foo/bar/:number" => { foo: { bar: 34 } }
- *    - "foo:map/bar>3/2/:boolean" => { foo: [0, 1, true, 3 ] }
- *    - "$:test/#12=2/:number" => { foo: }
- */
-//FfxCborStatus ffx_cbor_queryData(FfxCborCursor *cursor, const char *path,
-//  uint8_t *data, size_t *length);
-
-//FfxCborStatus ffx_cbor_queryValue(FfxCborCursor *cursor, const char *path,
-//  uint64_t *value);
-
-//FfxCborStatus ffx_cbor_query(FfxCborCursor *cursor, const char *path,
-//  FfxCborCursor *cursorOut);
+FfxDataError ffx_cbor_validate(FfxCborCursor cursor);
 
 /**
- *  Returns the type.
+ *  Returns the data type of the %%cursor%%.
  */
-FfxCborType ffx_cbor_getType(const FfxCborCursor *cursor);
+FfxCborType ffx_cbor_getType(FfxCborCursor cursor);
 
 /**
- *  Returns true of the cursor type matxhes any of %%types%%.
+ *  Returns true if the cursor type matches any of %%types%%.
  */
-bool ffx_cbor_checkType(const FfxCborCursor *cursor, FfxCborType types);
+bool ffx_cbor_checkType(FfxCborCursor cursor, FfxCborType types);
 
 /**
  *  Returns the value for scalar types (Null, Boolean, Number).
  *
- *  Null is always 0. Boolean is either 0 for false, or 1 for true.
- */
-FfxValueResult ffx_cbor_getValue(const FfxCborCursor *cursor);
-
-/**
- *  Exposes the underlying shared data buffer and length for data
- *  types (Data and String) without copying.
+ *  If .error is non-zero, .value = 0.
  *
- *  Do NOT modify these values.
+ *  The values:
+ *    - Null = 0
+ *    - Boolean: false = 0, true = 1
+ *    - Numbers: the value (negative values are currently unsupported)
  */
-FfxDataResult ffx_cbor_getData(const FfxCborCursor *cursor);
+FfxValueResult ffx_cbor_getValue(FfxCborCursor cursor);
 
 /**
- *  For Array and Map types, returns the number of values, and for
- *  Data and String types returns the length in bytes.
+ *  Returns the data for data types (Data and Strings).
+ *
+ *  If .error is non-zero, the .data = NULL and the .length = 0.
+ *
+ *  This points to the underlying CBOR data and MUST not be modified.
  */
-FfxSizeResult ffx_cbor_getLength(const FfxCborCursor *cursor);
+FfxDataResult ffx_cbor_getData(FfxCborCursor cursor);
 
-bool ffx_cbor_checkLength(const FfxCborCursor *cursor, FfxCborType types,
+/**
+ *  Returns the number of items for container types (Array and Map) and
+ *  returns the length for data types (Data and Strings).
+ *
+ *  If .error is non-zero, the .value = 0.
+ */
+FfxSizeResult ffx_cbor_getLength(FfxCborCursor cursor);
+
+/**
+ *  Returns true if type matches one of %%types%% and the %%length%% matches.
+ */
+bool ffx_cbor_checkLength(FfxCborCursor cursor, FfxCborType types,
   size_t length);
 
 /**
  *  Returns a cursor pointing to the value for %%key%%.
  *
- *  If the Map does not have %%key%%, returns .error = FfxDataErrorNotFound.
+ *  If .error == FfxDataErrorNotFound, the %%key%% does not exist in the Map.
  */
-FfxCborCursor ffx_cbor_followKey(const FfxCborCursor *cursor, const char *key);
+FfxCborCursor ffx_cbor_followKey(FfxCborCursor cursor, const char *key);
 
 /**
  *  Returns a cursor pointing to the %%index%% item.
  *
- *  If outside the bounds of the Array, returns .error = FfxDataErrorNotFound.
+ *  If .error = FfxDataErrorNotFound, the %%index%% is out of range of
+ *  the Array.
  */
-FfxCborCursor ffx_cbor_followIndex(const FfxCborCursor *cursor, size_t index);
+FfxCborCursor ffx_cbor_followIndex(FfxCborCursor cursor, size_t index);
 
 /**
- *  Iterates over an Array or Map.
+ *  Iterates over a container type (Array or Map).
  *
  *  example:
  *    FfxCborIterator iter = ffx_cbor_iterate(&cursor);
@@ -176,20 +157,20 @@ FfxCborCursor ffx_cbor_followIndex(const FfxCborCursor *cursor, size_t index);
  *    }
  *
  */
-FfxCborIterator ffx_cbor_iterate(const FfxCborCursor *container);
-
-bool ffx_cbor_nextChild(FfxCborIterator *iterator);
-//bool ffx_cbor_hasNext(FfxCborIterator *iterator);
-
-//bool ffx_cbor_isDone(FfxCborCursor *cursor);
-
-// Low-level; not for normal use. May be removed
-bool _ffx_cbor_next(FfxCborCursor *cursor, FfxDataError *error);
+FfxCborIterator ffx_cbor_iterate(FfxCborCursor container);
 
 /**
- *  Dumps the structured CBOR data to the console.
+ *  Advances the cursor to the next item in the container.
+ *  See [ffx_cbor_iterate]] for usage.
  */
-void ffx_cbor_dump(const FfxCborCursor *cursor);
+bool ffx_cbor_nextChild(FfxCborIterator *iterator);
+
+//bool ffx_cbor_hasNext(FfxCborIterator *iterator);
+
+/**
+ *  Dumps the structured CBOR data to the console via printf.
+ */
+void ffx_cbor_dump(FfxCborCursor cursor);
 
 
 /**

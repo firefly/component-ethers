@@ -163,8 +163,8 @@ bool ffx_mnemonic_getSeed(FfxMnemonic *mnemonic, const char* password,
   uint8_t *seed) {
     for (int i = strlen(password) - 1; i >= 0; i--) {
         if (password[i] < 32 || password[i] > 126) {
-            printf("Unsupported password: '%s' (%lu bytes)\n", password,
-              strlen(password));
+            printf("Unsupported password: '%s' (%d bytes)\n", password,
+              (int)strlen(password));
             return false;
         }
     }

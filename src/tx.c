@@ -31,7 +31,7 @@ typedef enum Format {
 } Format;
 
 
-static FfxTxStatus append(FfxRlpBuilder *rlp, Format format, FfxCborCursor *tx,
+static FfxTxStatus append(FfxRlpBuilder *rlp, Format format, FfxCborCursor tx,
   const char* key) {
 
     FfxCborCursor value = ffx_cbor_followKey(tx, key);
@@ -42,11 +42,11 @@ static FfxTxStatus append(FfxRlpBuilder *rlp, Format format, FfxCborCursor *tx,
         return FfxTxStatusBadData;
     }
 
-    if (!ffx_cbor_checkType(&value, FfxCborTypeData)) {
+    if (!ffx_cbor_checkType(value, FfxCborTypeData)) {
         return FfxTxStatusBadData;
     }
 
-    FfxDataResult data = ffx_cbor_getData(&value);
+    FfxDataResult data = ffx_cbor_getData(value);
     if (data.error) { return FfxTxStatusBadData; }
 
     const uint8_t *bytes = data.bytes;
@@ -99,7 +99,7 @@ static FfxTxStatus append(FfxRlpBuilder *rlp, Format format, FfxCborCursor *tx,
     } while(0);
 
 
-static FfxTxStatus appendAccessList(FfxRlpBuilder *rlp, FfxCborCursor *tx) {
+static FfxTxStatus appendAccessList(FfxRlpBuilder *rlp, FfxCborCursor tx) {
     // Copy the access list (if any) to the RLP
 
     // If the accessList key is absent, use the default, an empty access list
@@ -111,34 +111,34 @@ static FfxTxStatus appendAccessList(FfxRlpBuilder *rlp, FfxCborCursor *tx) {
         return FfxTxStatusBadData;
     }
 
-    checkArray(&accessList);
+    checkArray(accessList);
 
     size_t i = 0;
     FfxRlpBuilderTag iTag = ffx_rlp_appendMutableArray(rlp);
     if (rlp->error) { return mungeDataError(rlp->error); }
 
-    FfxCborIterator iter = ffx_cbor_iterate(&accessList);
+    FfxCborIterator iter = ffx_cbor_iterate(accessList);
     while (ffx_cbor_nextChild(&iter)) {
 
         // Check: [ address, slots ]
-        checkArrayLength(&iter.child, 2);
+        checkArrayLength(iter.child, 2);
 
         ffx_rlp_appendArray(rlp, 2);
         if (rlp->error) { return mungeDataError(rlp->error); }
 
         // Check: X = [ data: 20 bytes ]
-        FfxCborCursor address = ffx_cbor_followIndex(&iter.child, 0);
+        FfxCborCursor address = ffx_cbor_followIndex(iter.child, 0);
         if (address.error) { return FfxTxStatusBadData; }
 
         {
-            readDataLength(data, &address, 20);
+            readDataLength(data, address, 20);
             ffx_rlp_appendData(rlp, data.bytes, data.length);
             if (rlp->error) { return mungeDataError(rlp->error); }
         }
 
         // Check: Y = [ ]
-        FfxCborCursor slots = ffx_cbor_followIndex(&iter.child, 1);
-        if (slots.error || !ffx_cbor_checkType(&slots, FfxCborTypeArray)) {
+        FfxCborCursor slots = ffx_cbor_followIndex(iter.child, 1);
+        if (slots.error || !ffx_cbor_checkType(slots, FfxCborTypeArray)) {
             return FfxTxStatusBadData;
         }
 
@@ -146,9 +146,9 @@ static FfxTxStatus appendAccessList(FfxRlpBuilder *rlp, FfxCborCursor *tx) {
         FfxRlpBuilderTag siTag = ffx_rlp_appendMutableArray(rlp);
         if (rlp->error) { return mungeDataError(rlp->error); }
 
-        FfxCborIterator iterSlots = ffx_cbor_iterate(&slots);
+        FfxCborIterator iterSlots = ffx_cbor_iterate(slots);
         while (ffx_cbor_nextChild(&iterSlots)) {
-            readDataLength(data, &iterSlots.child, 32);
+            readDataLength(data, iterSlots.child, 32);
 
             ffx_rlp_appendData(rlp, data.bytes, data.length);
             if (rlp->error) { return mungeDataError(rlp->error); }
@@ -168,7 +168,7 @@ static FfxTxStatus appendAccessList(FfxRlpBuilder *rlp, FfxCborCursor *tx) {
 
 
 
-FfxTxStatus serialize1559(FfxCborCursor *tx, FfxRlpBuilder *rlp) {
+FfxTxStatus serialize1559(FfxCborCursor tx, FfxRlpBuilder *rlp) {
 
     // The Unsigned EIP-1559 Tx has 9 fields
     if (!ffx_rlp_appendArray(rlp, 9)) { return mungeDataError(rlp->error); }
@@ -215,17 +215,17 @@ typedef struct ReadNumber {
     FfxTxStatus status;
 } ReadNumber;
 
-ReadNumber readNumber(FfxCborCursor *tx, const char* key) {
+static ReadNumber readNumber(FfxCborCursor tx, const char* key) {
     ReadNumber result = { 0 };
 
     FfxCborCursor follow = ffx_cbor_followKey(tx, key);
     if (follow.error) {
         return (ReadNumber){ .status = mungeDataError(follow.error) };
-    } else if (!ffx_cbor_checkType(&follow, FfxCborTypeData)) {
+    } else if (!ffx_cbor_checkType(follow, FfxCborTypeData)) {
         return (ReadNumber){ .status = FfxTxStatusBadData };
     }
 
-    FfxDataResult data = ffx_cbor_getData(&follow);
+    FfxDataResult data = ffx_cbor_getData(follow);
     if (data.error) {
         result.status = mungeDataError(data.error);
         return result;
@@ -244,7 +244,7 @@ ReadNumber readNumber(FfxCborCursor *tx, const char* key) {
     return result;
 }
 
-FfxTx ffx_tx_serializeUnsigned(FfxCborCursor *tx, uint8_t *data, size_t length) {
+FfxTx ffx_tx_serializeUnsigned(FfxCborCursor tx, uint8_t *data, size_t length) {
     FfxTx result = { 0 };
 
     {

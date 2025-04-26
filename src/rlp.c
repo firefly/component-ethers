@@ -71,16 +71,10 @@ FfxRlpCursor ffx_rlp_walk(const uint8_t *data, size_t length) {
     return (FfxRlpCursor){ .data = data, .length = length };
 }
 
-FfxRlpCursor ffx_rlp_clone(const FfxRlpCursor *cursor) {
-    FfxRlpCursor result = { 0 };
-    memcpy(&result, cursor, sizeof(FfxRlpCursor));
-    return result;
-}
+FfxRlpType ffx_rlp_getType(FfxRlpCursor cursor) {
+    if (cursor.offset >= cursor.length) { return FfxRlpTypeError; }
 
-FfxRlpType ffx_rlp_getType(const FfxRlpCursor *cursor) {
-    if (cursor->offset >= cursor->length) { return FfxRlpTypeError; }
-
-    switch (cursor->data[cursor->offset] & 0xc0) {
+    switch (cursor.data[cursor.offset] & 0xc0) {
         case TAG_ARRAY:
             return FfxRlpTypeArray;
         case 0: case TAG_DATA:
