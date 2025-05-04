@@ -3,6 +3,7 @@ cmake_minimum_required(VERSION 3.16)
 idf_component_register(
   SRCS
     "src/address.c"
+    "src/bigint.c"
     "src/bip32.c"
     "src/cbor.c"
     "src/ecc.c"
