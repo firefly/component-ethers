@@ -123,7 +123,9 @@ FfxDataResult ffx_cbor_getData(FfxCborCursor cursor);
  *
  *  If .error is non-zero, the .value = 0.
  */
-FfxSizeResult ffx_cbor_getLength(FfxCborCursor cursor);
+FfxSizeResult ffx_cbor_getDataLength(FfxCborCursor cursor);
+
+FfxSizeResult ffx_cbor_getContainerCount(FfxCborCursor cursor);
 
 /**
  *  Returns true if type matches one of %%types%% and the %%length%% matches.
@@ -150,7 +152,7 @@ FfxCborCursor ffx_cbor_followIndex(FfxCborCursor cursor, size_t index);
  *  Iterates over a container type (Array or Map).
  *
  *  example:
- *    FfxCborIterator iter = ffx_cbor_iterate(&cursor);
+ *    FfxCborIterator iter = ffx_cbor_iterate(cursor);
  *    while(ffx_cbor_nextChild(&iter)) {
  *        FfxCborCursor cursor = iter.child;
  *        // ...

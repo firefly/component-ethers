@@ -186,34 +186,37 @@ FfxDataResult ffx_cbor_getData(FfxCborCursor cursor) {
     return (FfxDataResult){ .bytes = info.data, .length = info.value };
 }
 
-FfxSizeResult ffx_cbor_getLength(FfxCborCursor cursor) {
+static FfxSizeResult getLength(FfxCborCursor *cursor, FfxCborType types) {
 
-    CursorInfo info = getInfo(&cursor);
+    CursorInfo info = getInfo(cursor);
     if (info.error) { return (FfxSizeResult){ .error = info.error }; }
     assert(info.data != NULL && info.type != FfxCborTypeError);
 
-    // Only support lengths up to 16 bits
+    // Only support lengths up to 24 bits
     if (info.value > MAX_LENGTH) {
         return (FfxSizeResult){ .error = FfxDataErrorOverflow };
     }
 
-    switch (info.type) {
-        case FfxCborTypeData: case FfxCborTypeString:
-        case FfxCborTypeArray: case FfxCborTypeMap:
-            return (FfxSizeResult){ .value = info.value };
-        default:
-            break;
+    if ((info.type & types) == 0) {
+        return (FfxSizeResult){ .error = FfxDataErrorInvalidOperation };
     }
 
-    return (FfxSizeResult){ .error = FfxDataErrorInvalidOperation };
+    return (FfxSizeResult){ .value = info.value };
+}
+
+FfxSizeResult ffx_cbor_getDataLength(FfxCborCursor cursor) {
+    return getLength(&cursor, FfxCborTypeData | FfxCborTypeString);
+}
+
+FfxSizeResult ffx_cbor_getContainerCount(FfxCborCursor cursor) {
+    return getLength(&cursor, FfxCborTypeArray | FfxCborTypeMap);
 }
 
 bool ffx_cbor_checkLength(FfxCborCursor cursor, FfxCborType types,
   size_t length) {
 
     if (cursor.error) { return false; }
-    if (!ffx_cbor_checkType(cursor, types)) { return false; }
-    FfxSizeResult result = ffx_cbor_getLength(cursor);
+    FfxSizeResult result = getLength(&cursor, types);
     if (result.error) { return false; }
     return (result.value == length);
 }
@@ -317,11 +320,11 @@ static bool nextValue(FfxCborIterator *iter) {
     while (skip != 0) {
         FfxCborType type = ffx_cbor_getType(follow);
         if (type == FfxCborTypeArray) {
-            FfxSizeResult result = ffx_cbor_getLength(follow);
+            FfxSizeResult result = ffx_cbor_getContainerCount(follow);
             if (result.error) { return false; }
             skip += result.value;
         } else if (type == FfxCborTypeMap) {
-            FfxSizeResult result = ffx_cbor_getLength(follow);
+            FfxSizeResult result = ffx_cbor_getContainerCount(follow);
             if (result.error) { return false; }
             skip += 2 * result.value;
         }
