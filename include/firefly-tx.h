@@ -10,8 +10,10 @@ extern "C" {
 #include <stdint.h>
 
 #include "firefly-cbor.h"
+#include "firefly-data.h"
 
 // Use FfxDataError?
+/*
 typedef enum FfxTxStatus {
     FfxTxStatusOK                    = 0,
     FfxTxStatusBufferOverrun,
@@ -19,11 +21,11 @@ typedef enum FfxTxStatus {
     FfxTxStatusOverflow,  // @TODO: Bad data?
     FfxTxStatusUnsupportedType,
 } FfxTxStatus;
-
+*/
 
 typedef struct FfxTx {
     FfxData rlp;
-    FfxTxStatus status;
+    FfxDataError error;
     uint8_t type;
 } FfxTx;
 
@@ -38,10 +40,36 @@ FfxTx ffx_tx_serializeUnsigned(FfxCborCursor tx, uint8_t *data,
 
 //FfxTxStatus ffx_tx_serializeSigned(FfxCborCursor *tx, uint8_t *signature,);
 
+/**
+ *  Returns the chain ID of the %%tx%%.
+ */
+FfxDataResult ffx_tx_getChainId(FfxTx tx);
+
+/**
+ *  Returns the address of the %%tx%%. If the transaction type allows for
+ *  NULL address, the result length will be 0.
+ */
 FfxDataResult ffx_tx_getAddress(FfxTx tx);
+
+/**
+ *  Returns the data of the %%tx%%.
+ */
 FfxDataResult ffx_tx_getData(FfxTx tx);
+
+/**
+ *  Returns the value of the %%tx%%.
+ */
 FfxDataResult ffx_tx_getValue(FfxTx tx);
+
+/**
+ *  Returns true if the transaction has a signature.
+ */
 bool ffx_tx_isSigned(FfxTx tx);
+
+/**
+ *  Dump the %%tx%% to the console.
+ */
+void ffx_tx_dump(FfxTx tx);
 
 
 #ifdef __cplusplus
