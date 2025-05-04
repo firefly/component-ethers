@@ -8,7 +8,7 @@
 
 // DEBUG
 #include <stdio.h>
-void dumpBuffer(const char*, uint8_t*, size_t);
+void dumpBuffer(const char*, const uint8_t*, size_t);
 
 #define WORDLIST            wordlist_en
 
@@ -156,6 +156,31 @@ const char* ffx_mnemonic_getWord(FfxMnemonic *mnemonic, int index) {
     return ffx_bip39_word(wordIndex);
 }
 
+size_t ffx_mnemonic_getPhraseLength(FfxMnemonic *mnemonic) {
+    size_t length = 0;
+    for (int i = 0; i < mnemonic->wordCount; i++) {
+        length += strlen(ffx_mnemonic_getWord(mnemonic, i)) + 1;
+    }
+    return length;
+}
+
+bool ffx_mnemonic_getPhrase(FfxMnemonic *mnemonic, char* phraseOut,
+  size_t length) {
+
+    size_t offset = 0;
+    for (int i = 0; i < mnemonic->wordCount; i++) {
+        const char* word = ffx_mnemonic_getWord(mnemonic, i);
+        size_t l = strlen(word);
+        if (offset + l + 1 >= length) { return false; }
+        strcpy(&phraseOut[offset], word);
+        offset += l;
+        phraseOut[offset++] = ' ';
+    }
+
+    phraseOut[offset - 1] = '\0';
+
+    return true;
+}
 
 static const char saltPrefix[] = "mnemonic";
 
@@ -213,10 +238,6 @@ bool ffx_hdnode_initSeed(FfxHDNode *node, const uint8_t *seed) {
     memcpy(node->chaincode, &I[32], 32);
 
     return true;
-}
-
-void ffx_hdnode_clone(FfxHDNode *dst, FfxHDNode *src) {
-    memmove(dst, src, sizeof(FfxHDNode));
 }
 
 // See: ecc.c
@@ -280,8 +301,7 @@ bool ffx_hdnode_deriveChild(FfxHDNode *node, uint32_t index) {
 }
 
 bool ffx_hdnode_derivePath(FfxHDNode *_node, const char* path) {
-    FfxHDNode node;
-    ffx_hdnode_clone(&node, _node);
+    FfxHDNode node = *_node;
 
     size_t length = strlen(path) + 1;
     uint32_t index = 0, count = 0;
@@ -331,7 +351,34 @@ bool ffx_hdnode_derivePath(FfxHDNode *_node, const char* path) {
         }
     }
 
-    ffx_hdnode_clone(_node, &node);
+    *_node = node;
+    return true;
+}
+
+bool ffx_hdnode_deriveAccount(FfxHDNode *_node, uint32_t account) {
+    if (account & FfxHDNodeHardened) { return false; }
+
+    FfxHDNode node = *_node;
+
+    if (!ffx_hdnode_derivePath(&node, "m/44'/60'")) { return false; }
+    if (!ffx_hdnode_deriveChild(&node, FfxHDNodeHardened | account)) {
+        return false;
+    }
+    if (!ffx_hdnode_derivePath(&node, "0/0'")) { return false; }
+
+    *_node = node;
+    return true;
+}
+
+bool ffx_hdnode_deriveIndexedAccount(FfxHDNode *_node, uint32_t account) {
+    if (account & FfxHDNodeHardened) { return false; }
+
+    FfxHDNode node = *_node;
+
+    if (!ffx_hdnode_derivePath(&node, "m/44'/60'/0'/0")) { return false; }
+    if (!ffx_hdnode_deriveChild(&node, account)) { return false; }
+
+    *_node = node;
     return true;
 }
 
