@@ -49,8 +49,7 @@ typedef struct FfxRlpCursor {
 typedef struct FfxRlpIterator {
     FfxRlpCursor child;
 
-    FfxRlpCursor container;
-    size_t _containerLength, _containerOffset;
+    size_t _nextOffset, _containerEnd;
 
     FfxDataError error;
 } FfxRlpIterator;
@@ -72,13 +71,38 @@ FfxRlpCursor ffx_rlp_walk(const uint8_t *data, size_t length);
 
 FfxRlpType ffx_rlp_getType(FfxRlpCursor cursor);
 
-FfxSizeResult ffx_rlp_getLength(FfxRlpCursor cursor);
+/**
+ *  Returns the length in bytes of a Data or the number of items
+ *  of an Array.
+ */
+FfxSizeResult ffx_rlp_getDataLength(FfxRlpCursor cursor);
+
+FfxSizeResult ffx_rlp_getArrayCount(FfxRlpCursor cursor);
+
+/**
+ *  Returns the data of a Data.
+ */
+FfxDataResult ffx_rlp_getData(FfxRlpCursor cursor);
 
 FfxRlpCursor ffx_rlp_followIndex(FfxRlpCursor cursor, size_t index);
 
-FfxDataResult ffx_rlp_getData(FfxRlpCursor cursor);
+/**
+ *  Iterates over an Array.
+ *
+ *  example:
+ *    FfxRlpIterator iter = ffx_rlp_iterate(cursor);
+ *    while(ffx_cbor_nextChild(&iter)) {
+ *        FfxRlpCursor cursor = iter.child;
+ *        // ...
+ *    }
+ *
+ */
+FfxRlpIterator ffx_rlp_iterate(FfxRlpCursor container);
 
-FfxRlpIterator ffx_rlp_iterate(FfxRlpCursor cursor);
+/**
+ *  Advances the cursor to the next item in the Array.
+ *  See [ffx_rlp_iterate]] for usage.
+ */
 bool ffx_rlp_nextChild(FfxRlpIterator *iterator);
 
 void ffx_rlp_dump(FfxRlpCursor cursor);

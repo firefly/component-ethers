@@ -54,6 +54,9 @@
 // a non-compact 4-byte size should be used regardless
 #define TAG_RESERVE       (0x00)
 
+#define MAX_LENGTH      (0xffffff)
+#define FIRST_ITER      (0xf000000)
+
 /**
  *  RLP
  *
@@ -65,6 +68,79 @@
  */
 
 ///////////////////////////////
+// Utils
+
+static size_t readValue(const uint8_t *data, size_t count) {
+    size_t v = 0;
+    for (int i = 0; i < count; i++) {
+        v <<= 8;
+        v |= data[i];
+    }
+    return v;
+}
+
+typedef struct Header {
+    FfxRlpType type;
+
+    const uint8_t *data;
+    size_t length;
+
+    size_t headerSize;
+
+    FfxDataError error;
+} Header;
+
+static Header getHeader(const uint8_t *data, size_t length, size_t offset) {
+    if (offset >= length) {
+        return (Header){ .error = FfxDataErrorBufferOverrun };
+    }
+
+    uint32_t byte = data[offset];
+
+    // Single byte of data
+    if ((byte & 0x80) == 0) {
+        return (Header){
+            .type = FfxRlpTypeData,
+            .data = &data[offset],
+            .length = 1,
+            .headerSize = 0
+        };
+    }
+
+    Header header = {
+        .type = ((byte & 0xc0) == TAG_DATA) ? FfxRlpTypeData: FfxRlpTypeArray,
+        .headerSize = 1
+    };
+
+    uint32_t v = (byte & 0x3f);
+    if (v > 55) {
+        v -= 55;
+
+        // Overflow!
+        if (v > 4) { return (Header){ .error = FfxDataErrorOverflow }; }
+
+        // Buffer Overrun
+        if (offset + 1 + v > length) {
+            return (Header){ .error = FfxDataErrorBufferOverrun };
+        }
+
+        header.headerSize = 1 + v;
+        v = readValue(&data[offset + 1], v);
+    }
+
+    if (v > MAX_LENGTH) { return (Header){ .error = FfxDataErrorOverflow }; }
+
+    header.data = &data[offset + header.headerSize];
+    header.length = v;
+
+    if (offset + header.headerSize + header.length > length) {
+        return (Header){ .error = FfxDataErrorBufferOverrun };
+    }
+
+    return header;
+}
+
+///////////////////////////////
 // Walking
 
 FfxRlpCursor ffx_rlp_walk(const uint8_t *data, size_t length) {
@@ -72,43 +148,154 @@ FfxRlpCursor ffx_rlp_walk(const uint8_t *data, size_t length) {
 }
 
 FfxRlpType ffx_rlp_getType(FfxRlpCursor cursor) {
-    if (cursor.offset >= cursor.length) { return FfxRlpTypeError; }
-
-    switch (cursor.data[cursor.offset] & 0xc0) {
-        case TAG_ARRAY:
-            return FfxRlpTypeArray;
-        case 0: case TAG_DATA:
-            return FfxRlpTypeData;
-    }
-
-    return FfxRlpTypeError;
+    if (cursor.error) { return FfxRlpTypeError; }
+    Header header = getHeader(cursor.data, cursor.length, cursor.offset);
+    if (header.error) { return FfxRlpTypeError; }
+    return header.type;
 }
 
-//size_t ffx_rlp_getLength(FfxRlpCursor *cursor) {
-//}
+FfxSizeResult ffx_rlp_getDataLength(FfxRlpCursor cursor) {
+    if (cursor.error) { return (FfxSizeResult){ .error = cursor.error }; }
 
-//FfxRlpStatus ffx_rlp_followIndex(FfxRlpCursor *cursor, size_t index) {
-//}
+    Header header = getHeader(cursor.data, cursor.length, cursor.offset);
+    if (header.error) { return (FfxSizeResult){ .error = cursor.error }; }
 
-//FfxRlpData ffx_rlp_getData(FfxRlpCursor *cursor, FfxRlpStatus *error) {
-//}
+    if (header.type != FfxRlpTypeData) {
+        return (FfxSizeResult){ .error = FfxDataErrorInvalidOperation };
+    }
 
-//bool ffx_rlp_iterate(FfxRlpCursor *cursor, FfxRlpStatus *status) {
-//}
-/*
-static void _dump(FfxRlpCursor *cursor) {
+    return (FfxSizeResult){ .value = header.length };
+}
+
+FfxSizeResult ffx_rlp_getArrayCount(FfxRlpCursor cursor) {
+    if (cursor.error) { return (FfxSizeResult){ .error = cursor.error }; }
+
+    Header header = getHeader(cursor.data, cursor.length, cursor.offset);
+    if (header.error) { return (FfxSizeResult){ .error = cursor.error }; }
+
+    if (header.type != FfxRlpTypeArray) {
+        return (FfxSizeResult){ .error = FfxDataErrorInvalidOperation };
+    }
+
+    size_t offset = cursor.offset + header.headerSize;
+    size_t end = offset + header.length;
+
+    size_t count = 0;
+    while (offset < end) {
+        // @TODO: Validate somewhere
+        Header h = getHeader(cursor.data, cursor.length, offset);
+        if (h.error) { return (FfxSizeResult){ .error = h.error }; }
+        offset += h.headerSize + h.length;
+        count++;
+    }
+
+    if (offset != end) {
+        return (FfxSizeResult){ .error = FfxDataErrorBadData };
+    }
+
+    return (FfxSizeResult){ .value = count };
+}
+
+
+FfxRlpCursor ffx_rlp_followIndex(FfxRlpCursor cursor, size_t index) {
+    FfxRlpIterator iter = ffx_rlp_iterate(cursor);
+    if (iter.error) { return (FfxRlpCursor){ .error = iter.error }; }
+
+    size_t count = 0;
+    while (ffx_rlp_nextChild(&iter)) {
+        if (iter.error) { return (FfxRlpCursor){ .error = iter.error }; }
+        if (count == index) { return iter.child; }
+        count++;
+    }
+
+    return (FfxRlpCursor){ .error = FfxDataErrorNotFound };
+}
+
+FfxDataResult ffx_rlp_getData(FfxRlpCursor cursor) {
+    if (cursor.error) { return (FfxDataResult){ .error = cursor.error }; }
+
+    Header header = getHeader(cursor.data, cursor.length, cursor.offset);
+    if (header.error) { return (FfxDataResult){ .error = header.error }; }
+
+    if (header.type != FfxRlpTypeData) {
+        return (FfxDataResult){ .error = FfxDataErrorInvalidOperation };
+    }
+
+    return (FfxDataResult){
+        .bytes = header.data,
+        .length = header.length
+    };
+}
+
+FfxRlpIterator ffx_rlp_iterate(FfxRlpCursor container) {
+
+    if (container.error) {
+        return (FfxRlpIterator){ .error = container.error };
+    }
+
+    size_t offset = container.offset;
+
+    Header header = getHeader(container.data, container.length, offset);
+    if (header.error) { return (FfxRlpIterator){ .error = header.error }; }
+    if (header.type != FfxRlpTypeArray) {
+        return (FfxRlpIterator){ .error = FfxDataErrorInvalidOperation };
+    }
+
+    offset += header.headerSize;
+
+    return (FfxRlpIterator){
+        .child = (FfxRlpCursor){
+            .data = container.data,
+            .length = container.length,
+            .offset = FIRST_ITER,
+        },
+        ._nextOffset = offset,
+        ._containerEnd = offset + header.length
+    };
+}
+
+bool ffx_rlp_nextChild(FfxRlpIterator *iterator) {
+    if (iterator->error) { return false; }
+
+    // Done!
+    if (iterator->_nextOffset == iterator->_containerEnd) { return false; }
+
+    // The data read past our end; data is corrupt
+    if (iterator->_nextOffset > iterator->_containerEnd) {
+        iterator->error = FfxDataErrorBadData;
+        return false;
+    }
+
+    iterator->child.offset = iterator->_nextOffset;
+
+    Header header = getHeader(iterator->child.data, iterator->child.length,
+      iterator->child.offset);
+
+    // Some error occured
+    if (header.error) {
+        iterator->error = header.error;
+        return false;
+    }
+
+    iterator->_nextOffset += header.headerSize + header.length;
+
+    return true;
+}
+
+static void _dump(FfxRlpCursor cursor) {
     FfxRlpType type = ffx_rlp_getType(cursor);
-
-    FfxRlpStatus status = FfxRlpStatusOK;
 
     switch(type) {
         case FfxRlpTypeData: {
-            FfxRlpDataResult data = ffx_rlp_getData(cursor, &status);
-            if (status) { break; }
+            FfxDataResult result = ffx_rlp_getData(cursor);
+            if (result.error) {
+                printf("<ERROR type=DATA status=%d>", result.error);
+                break;
+            }
 
             printf("0x");
-            for (int i = 0; i < data.length; i++) {
-                printf("%02x", data.bytes[i]);
+            for (int i = 0; i < result.length; i++) {
+                printf("%02x", result.bytes[i]);
             }
             break;
         }
@@ -117,18 +304,22 @@ static void _dump(FfxRlpCursor *cursor) {
             printf("[ ");
 
             bool first = true;
-
-            FfxRlpCursor follow;
-            ffx_rlp_clone(&follow, cursor);
-
-            FfxRlpStatus status = FfxRlpStatusBeginIterator;
-            while (ffx_rlp_iterate(&follow, &status)) {
-                if (!first) { printf(", "); }
-                first = false;
-                _dump(&follow);
+            FfxRlpIterator iter = ffx_rlp_iterate(cursor);
+            if (iter.error) {
+                printf("<ERROR type=ITER_BEGIN status=%d>", iter.error);
+                break;
             }
 
-            if (status) { break; }
+            while (ffx_rlp_nextChild(&iter)) {
+                if (!first) { printf(", "); }
+                first = false;
+                _dump(iter.child);
+            }
+
+            if (iter.error) {
+                printf("<ERROR type=ITER_END status=%d>", iter.error);
+                break;
+            }
 
             if (!first) { printf(" "); }
             printf("]");
@@ -139,15 +330,13 @@ static void _dump(FfxRlpCursor *cursor) {
             printf("<ERROR type=%d>", type);
             return;
     }
-
-    if (status) { printf("<ERROR status=%d>", status); }
 }
 
-void ffx_rlp_dump(FfxRlpCursor *cursor) {
+void ffx_rlp_dump(FfxRlpCursor cursor) {
     _dump(cursor);
     printf("\n");
 }
-*/
+
 ///////////////////////////////
 // Building - utils
 
@@ -264,15 +453,6 @@ bool ffx_rlp_adjustCount(FfxRlpBuilder *rlp, FfxRlpBuilderTag tag,
     rlp->offset = offset;
 
     return status;
-}
-
-static size_t readValue(uint8_t *data, size_t count) {
-    size_t v = 0;
-    for (int i = 0; i < count; i++) {
-        v <<= 8;
-        v |= data[i];
-    }
-    return v;
 }
 
 static size_t finalize(FfxRlpBuilder *rlp) {
