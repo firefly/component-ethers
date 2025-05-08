@@ -9,8 +9,11 @@ extern "C" {
 #include <stddef.h>
 #include <stdint.h>
 
-// 78 decimal digits + NULL-terminator
-#define FFX_BIGINT_STRING_LENGTH       (85 + 1)
+// String length to hold the output of getString
+// - sign: 1 char
+// - decimal digits: 85 chars
+// - NULL-terminator: 1 char
+#define FFX_BIGINT_STRING_LENGTH       (1 + 85 + 1)
 
 typedef enum FfxBigIntFlags {
     FfxBigIntFlagsNone             = 0,

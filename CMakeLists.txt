@@ -6,6 +6,7 @@ idf_component_register(
     "src/bigint.c"
     "src/bip32.c"
     "src/cbor.c"
+    "src/decimal.c"
     "src/ecc.c"
     "src/hmac.c"
     "src/keccak.c"

@@ -128,6 +128,7 @@ void ffx_bigint_addU32(FfxBigInt *out, const FfxBigInt *a, uint32_t b) {
             uint32_t sum = a->value[i] + carry1;
             out->value[i] = sum & MASK;
             carry1 = (sum >> 28);
+            // @TODO: Should be able to bail early if no carry
         }
     }
 
@@ -137,6 +138,7 @@ void ffx_bigint_addU32(FfxBigInt *out, const FfxBigInt *a, uint32_t b) {
         uint32_t sum = out->value[i] + carry0;
         out->value[i] = sum & MASK;
         carry0 = (sum >> 28);
+        // @TODO: Should be able to bail early if no carry
     }
 
     if (carry0 || carry1) { out->flags |= FfxBigIntFlagsCarry; }
@@ -295,7 +297,7 @@ uint32_t ffx_bigint_divmodU32(FfxBigInt *outDiv, const FfxBigInt *a,
         w = (w << 28) | a->value[i];
         if (w >= b) {
             t = (w / b);
-            w -= t * b;
+            w -= UINT64(t) * UINT64(b);
         }
         q.value[i] = t;
     }
@@ -470,17 +472,18 @@ uint16_t ffx_bigint_bitcount(const FfxBigInt *a) {
     return count;
 }
 
+// @TODO: Sign
 size_t ffx_bigint_getString(const FfxBigInt *a, char *out) {
     memset(out, 0, FFX_BIGINT_STRING_LENGTH);
 
     FfxBigInt v = *a;
 
-    int offset = 84;
-    int start = 84;
+    int start = FFX_BIGINT_STRING_LENGTH - 2;
+    int offset = start;
 
     out[start] = '0';
 
-    while (!ffx_bigint_isZero(&v) && offset >= 0) {
+    while (offset >= 0 && !ffx_bigint_isZero(&v)) {
         uint32_t c = ffx_bigint_divmodU32(&v, &v, 1000000000);
 
         for (int j = 0; j < 9; j++) {
@@ -498,7 +501,7 @@ size_t ffx_bigint_getString(const FfxBigInt *a, char *out) {
 
     ffx_bigint_clear(&v);
 
-    return FFX_BIGINT_STRING_LENGTH - 1 - start;
+    return FFX_BIGINT_STRING_LENGTH - start - 1;
 }
 
 void ffx_bigint_dump(FfxBigInt *value) {
@@ -508,7 +511,7 @@ void ffx_bigint_dump(FfxBigInt *value) {
         for (int j = 0; j < 7; j++) {
             uint32_t v = (value->value[i] >> (24 - j * 4)) & 0xf;
             if (v) { nonzero = true; }
-            if (nonzero) { printf("%x", v); }
+            if (nonzero) { printf("%x", (int)v); }
         }
     }
     if (!nonzero) { printf("0"); }
