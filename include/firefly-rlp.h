@@ -22,17 +22,6 @@ extern "C" {
  *  See: https://ethereum.org/en/developers/docs/data-structures-and-encoding/rlp/
  */
 
-/*
-typedef enum FfxRlpStatus {
-    FfxRlpStatusOK = 0,
-
-    FfxRlpStatusBufferOverrun = -31,
-    FfxRlpStatusOverflow = -55,
-
-    FfxRlpStatusBeginIterator = 20,
-} FfxRlpStatus;
-*/
-
 typedef enum FfxRlpType {
     FfxRlpTypeError   = 0,
     FfxRlpTypeData    = (1 << 5),

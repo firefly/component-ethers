@@ -25,11 +25,6 @@ typedef enum FfxDataError {
 } FfxDataError;
 
 
-typedef struct FfxData {
-    const uint8_t *bytes;
-    size_t length;
-} FfxData;
-
 typedef struct FfxDataResult {
     const uint8_t *bytes;
     size_t length;
