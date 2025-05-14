@@ -16,7 +16,7 @@ FfxDecimalResult ffx_decimal_formatValue(char *out, const FfxBigInt *value,
     // Normalize and set format defaults
     if (fmt.decimalChr == 0) { fmt.decimalChr = '.'; }
     if (fmt.groupChr == 0) { fmt.groupChr = ','; }
-    if (fmt.groups && groups < 3) { fmt.groups = 3; }
+    if (fmt.groups && fmt.groups < 3) { fmt.groups = 3; }
     if (fmt.maxDecimals > fmt.decimals) { fmt.maxDecimals = fmt.decimals; }
     if (fmt.minDecimals > fmt.decimals) { fmt.minDecimals = fmt.decimals; }
     if (fmt.maxDecimals < fmt.minDecimals) {
