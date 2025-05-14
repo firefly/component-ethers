@@ -189,11 +189,16 @@ int runTestTxs(const char* name, const uint8_t *privkey, FfxCborCursor tx,
     uint8_t bytes[1024];
     FfxTx result = ffx_tx_serializeUnsigned(tx, bytes, sizeof(bytes));
 
-    if (result.status) {
-        printf("Failed to serialize unsigned tx: status=%d\n", result.status);
+    if (result.error) {
+        printf("Failed to serialize unsigned tx: status=%d\n", result.error);
         ffx_cbor_dump(tx);
         return 1;
     }
+
+    //ffx_tx_dump(result);
+    //FfxDataResult addr = ffx_tx_getAddress(result);
+    //dumpBuffer("ADDR", addr.bytes, addr.length);
+
 
     if (result.rlp.length != rlpUnsignedLength ||
       cmpbuf(result.rlp.bytes, rlpUnsigned, rlpUnsignedLength)) {
