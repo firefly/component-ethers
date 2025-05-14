@@ -1,14 +1,18 @@
-import { readFileSync, writeFileSync } from "fs";
+import { readFileSync, writeFileSync } from "node:fs";
 
-const path = "../db/networks.json";
-const data = JSON.parse(readFileSync(path).toString());
+import { resolve } from "./utils.mjs"
+
+const data = ((filename) => {
+    console.log(`Reading: ${ filename }`);
+    const data = JSON.parse(readFileSync(filename).toString());
+    return data.sort((a, b) => a.chainId - b.chainId);
+})(resolve("networks.json"))
+
 
 const strings = [ ];
 let stringsIndex = 0;
-const indices = [ ];
 
-data.sort((a, b) => a.chainId - b.chainId);
-console.log(data);
+const indices = [ ];
 
 function pad(length) {
     let v = "                ";
@@ -51,8 +55,6 @@ function hex(v, length) {
     return `0x${ v }`
 }
 
-console.log({ strings, indices });
-
 const lines = [ ];
 lines.push(`#ifndef __DB_NETWORKS_H__`);
 lines.push(`#define __DB_NETWORKS_H__`);
@@ -91,5 +93,8 @@ lines.push(`#endif /* __cplusplus */`);
 lines.push(``);
 lines.push(`#endif /* __DB_NETWORKS_H__ */`);
 
-console.log(lines.join("\n"));
-writeFileSync("../src/db-networks.h", lines.join("\n"));
+{
+    const filename = resolve("../src/db-networks.h");
+    console.log(`Writing: ${ filename }`);
+    writeFileSync(filename, lines.join("\n"));
+}
