@@ -1,0 +1,38 @@
+[
+  {
+    "name": "mainnet",
+    "token": "ETH",
+    "chainId": 1
+  },
+  {
+    "name": "Sepolia",
+    "token": "sETH",
+    "chainId": 11155111
+  },
+  {
+    "name": "Arbitrum",
+    "token": "ETH",
+    "chainId": 42161
+  },
+  {
+    "name": "Base",
+    "token": "ETH",
+    "chainId": 8453
+  },
+  {
+    "name": "Linea",
+    "token": "ETH",
+    "chainId": 59144
+  },
+  {
+    "name": "Optimism",
+    "token": "ETH",
+    "chainId": 10
+  },
+  {
+    "name": "Polygon",
+    "token": "POL",
+    "chainId": 137
+  },
+  { }
+]
