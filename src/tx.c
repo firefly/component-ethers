@@ -18,6 +18,16 @@ typedef enum Format {
 } Format;
 
 
+static uint8_t getType(FfxDataResult *tx) {
+    if (tx->error || tx->length == 0 || tx->bytes[0] != 2) { return 0; }
+    return tx->bytes[0];
+}
+
+uint8_t ffx_tx_getType(FfxDataResult tx) {
+    return getType(&tx);
+}
+
+
 static FfxDataError append(FfxRlpBuilder *rlp, Format format, FfxCborCursor tx,
   const char* key) {
 
@@ -206,61 +216,64 @@ static FfxValueResult readNumber(FfxCborCursor tx, const char* key) {
     return (FfxValueResult){ .value = value };
 }
 
-FfxTx ffx_tx_serializeUnsigned(FfxCborCursor tx, uint8_t *data, size_t length) {
-    FfxTx result = { 0 };
+FfxDataResult ffx_tx_serializeUnsigned(FfxCborCursor tx, uint8_t *data,
+  size_t length) {
 
+    uint8_t type = 0;
     {
-        FfxValueResult type = readNumber(tx, "type");
-        if (type.value > 0x7f) {
-            return (FfxTx){ .error = FfxDataErrorUnsupportedFeature };
+        FfxValueResult result = readNumber(tx, "type");
+        if (result.value > 0x7f) {
+            return (FfxDataResult){ .error = FfxDataErrorUnsupportedFeature };
         }
-        if (type.error) { return (FfxTx){ .error = type.error }; }
+        if (result.error) { return (FfxDataResult){ .error = result.error }; }
 
-        result.type = type.value;
+        type = result.value;
     }
 
-    switch (result.type) {
+    switch (type) {
         case 2:
             break;
         default:
-            return (FfxTx){ .error = FfxDataErrorUnsupportedFeature };
+            return (FfxDataResult){ .error = FfxDataErrorUnsupportedFeature };
     }
 
     // Add the EIP-2718 Envelope Type;
     if (length < 1) {
-        return (FfxTx){ .error = FfxDataErrorBufferOverrun };
+        return (FfxDataResult){ .error = FfxDataErrorBufferOverrun };
     }
-    data[0] = result.type;
+    data[0] = type;
+
+    FfxDataResult result = { .bytes = data };
 
     // Skip the Envelope Type during RLP output
     FfxRlpBuilder rlp = ffx_rlp_build(&data[1], length - 1);
 
-    result.rlp.bytes = data;
-
     FfxDataError error = serialize1559(tx, &rlp);
-    result.rlp.length = ffx_rlp_finalize(&rlp) + 1;
+    result.length = ffx_rlp_finalize(&rlp) + 1;
     if (error) { result.error = error; }
 
     return result;
 }
 
-static FfxRlpCursor getRlp(FfxTx tx) {
-    if (tx.type == 2) {
-        if (tx.rlp.length == 0) {
+static FfxRlpCursor getRlp(FfxDataResult tx) {
+    if (getType(&tx) == 2) {
+        if (tx.length == 0) {
             return (FfxRlpCursor){ .error = FfxDataErrorBadData };
         }
-        return ffx_rlp_walk(&tx.rlp.bytes[1], tx.rlp.length - 1);
+        return ffx_rlp_walk(&tx.bytes[1], tx.length - 1);
     }
     return (FfxRlpCursor){ .error = FfxDataErrorUnsupportedFeature };
 }
 
-static FfxDataResult readFormat(FfxTx tx, Format format, size_t index) {
+static FfxDataResult readFormat(FfxDataResult tx, Format format,
+  size_t index) {
+
     if (tx.error) { return (FfxDataResult){ .error = tx.error }; }
 
     FfxRlpCursor rlp = getRlp(tx);
     if (rlp.error) { return (FfxDataResult){ .error = rlp.error }; }
 
-    if (tx.type == 2) {
+    if (getType(&tx) == 2) {
         // Make sure it is a valid EIP-1559 tx
         FfxSizeResult count = ffx_rlp_getArrayCount(rlp);
         if (count.error) { return (FfxDataResult){ .error = count.error }; }
@@ -295,32 +308,32 @@ static FfxDataResult readFormat(FfxTx tx, Format format, size_t index) {
     return (FfxDataResult){ .error = FfxDataErrorBadData };
 }
 
-FfxDataResult ffx_tx_getAddress(FfxTx tx) {
+FfxDataResult ffx_tx_getAddress(FfxDataResult tx) {
     // @TODO: in the future, when adding support for other types, this
     //        result should be checked for nullable vs non-nullable
     return readFormat(tx, FormatNullableAddress, 5);
 }
 
-FfxDataResult ffx_tx_getChainId(FfxTx tx) {
+FfxDataResult ffx_tx_getChainId(FfxDataResult tx) {
     return readFormat(tx, FormatNumber, 0);
 }
 
-FfxDataResult ffx_tx_getData(FfxTx tx) {
+FfxDataResult ffx_tx_getData(FfxDataResult tx) {
     return readFormat(tx, FormatData, 7);
 }
 
-FfxDataResult ffx_tx_getValue(FfxTx tx) {
+FfxDataResult ffx_tx_getValue(FfxDataResult tx) {
     return readFormat(tx, FormatNumber, 6);
 }
 
 
-bool ffx_tx_isSigned(FfxTx tx) {
+bool ffx_tx_isSigned(FfxDataResult tx) {
     if (tx.error) { return false; }
 
     FfxRlpCursor rlp = getRlp(tx);
     if (rlp.error) { return false; }
 
-    switch (tx.type) {
+    switch (getType(&tx)) {
         case 2: {
             FfxSizeResult count = ffx_rlp_getArrayCount(rlp);
             if (count.error) { return false; }
@@ -333,8 +346,8 @@ bool ffx_tx_isSigned(FfxTx tx) {
     return false;
 }
 
-void ffx_tx_dump(FfxTx tx) {
-    printf("Transaction: type=%d error=%d\n", tx.type, tx.error);
+void ffx_tx_dump(FfxDataResult tx) {
+    printf("Transaction: type=%d error=%d\n", getType(&tx), tx.error);
 
     if (tx.error) {
         printf("\n");
@@ -342,9 +355,9 @@ void ffx_tx_dump(FfxTx tx) {
     }
 
     printf("RLP Data: 0x");
-    for (int i = 0; i < tx.rlp.length; i++) { printf("%02x", tx.rlp.bytes[i]); }
-    printf(" (length=%d)\n", (int)tx.rlp.length);
+    for (int i = 0; i < tx.length; i++) { printf("%02x", tx.bytes[i]); }
+    printf(" (length=%d)\n", (int)tx.length);
 
     printf("RLP Structured: ");
-    ffx_rlp_dump(ffx_rlp_walk(&tx.rlp.bytes[1], tx.rlp.length - 1));
+    ffx_rlp_dump(ffx_rlp_walk(&tx.bytes[1], tx.length - 1));
 }
