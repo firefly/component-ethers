@@ -629,7 +629,8 @@ bool ffx_cbor_appendNumber(FfxCborBuilder *cbor, uint64_t value) {
     return _appendHeader(cbor, 0, value);
 }
 
-bool ffx_cbor_appendData(FfxCborBuilder *cbor, uint8_t *data, size_t length) {
+bool ffx_cbor_appendData(FfxCborBuilder *cbor, const uint8_t *data,
+  size_t length) {
     if (!_appendHeader(cbor, 2, length)) { return false; }
 
     if (cbor->length < cbor->offset + length) {
@@ -643,10 +644,13 @@ bool ffx_cbor_appendData(FfxCborBuilder *cbor, uint8_t *data, size_t length) {
     return FfxDataErrorNone;
 }
 
-bool ffx_cbor_appendString(FfxCborBuilder *cbor, char* str) {
-    if (cbor->error) { return false; }
+bool ffx_cbor_appendString(FfxCborBuilder *cbor, const char* str) {
+    return ffx_cbor_appendStringData(cbor, (const uint8_t*)str, strlen(str));
+}
 
-    size_t length = strlen(str);
+bool ffx_cbor_appendStringData(FfxCborBuilder *cbor, const uint8_t* data,
+  size_t length) {
+    if (cbor->error) { return false; }
 
     if (!_appendHeader(cbor, 3, length)) { return false; }
 
@@ -655,7 +659,7 @@ bool ffx_cbor_appendString(FfxCborBuilder *cbor, char* str) {
         return false;
     }
 
-    memmove(&cbor->data[cbor->offset], str, length);
+    memmove(&cbor->data[cbor->offset], data, length);
     cbor->offset += length;
 
     return true;

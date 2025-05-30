@@ -203,12 +203,16 @@ bool ffx_cbor_appendNumber(FfxCborBuilder *cbor, uint64_t value);
 /**
  *  Append data.
  */
-bool ffx_cbor_appendData(FfxCborBuilder *cbor, uint8_t *data, size_t length);
+bool ffx_cbor_appendData(FfxCborBuilder *cbor, const uint8_t *data,
+  size_t length);
 
 /**
  *  Append a string.
  */
-bool ffx_cbor_appendString(FfxCborBuilder *cbor, char* str);
+bool ffx_cbor_appendString(FfxCborBuilder *cbor, const char* str);
+
+bool ffx_cbor_appendStringData(FfxCborBuilder *cbor, const uint8_t* data,
+  size_t length);
 
 /**
  *  Begin an Array of %%count%% items long.
