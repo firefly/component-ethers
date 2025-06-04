@@ -8,7 +8,7 @@ idf_component_register(
     "src/cbor.c"
     "src/db.c"
     "src/decimal.c"
-    "src/ec.c"
+    "src/ecc.c"
     "src/hmac.c"
     "src/keccak.c"
     "src/rlp.c"
