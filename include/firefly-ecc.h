@@ -30,6 +30,23 @@ typedef struct FfxEcSignature {
 } FfxEcSignature;
 
 
+#define FFX_INIT_PUBKEY(name,value) \
+  FfxEcPubkey name; memcpy(name.data, value, sizeof(name.data));
+
+#define FFX_INIT_COMPPUBKEY(name,value) \
+  FfxEcCompPubkey name; memcpy(name.data, value, sizeof(name.data));
+
+#define FFX_INIT_PRIVKEY(name,value) \
+  FfxEcPrivkey name; memcpy(name.data, value, sizeof(name.data));
+
+#define FFX_INIT_DIGEST(name,value) \
+  FfxEcDigest name; memcpy(name.data, value, sizeof(name.data));
+
+#define FFX_INIT_SIGNATURE(name,value) \
+  FfxEcSignature name; memcpy(name.data, value, sizeof(name.data));
+
+
+
 void ffx_ec_init(uint8_t *randomize);
 
 bool ffx_ec_getPubkey(FfxEcPubkey *pubkeyOut, const FfxEcPrivkey *privkey);

@@ -22,6 +22,13 @@ typedef struct FfxChecksumAddress {
 } FfxChecksumAddress;
 
 
+#define FFX_INIT_ADDRESS(name,value) \
+  FfxAddress name; memcpy(name.data, value, sizeof(name.data));
+
+#define FFX_INIT_CHECKSUMADDRESS(name,value) \
+  FfxChecksumAddress name; memcpy(name.data, value, sizeof(name.data));
+
+
 /**
  *  Returns the EIP-155 %%checksumed%% address of %%address%.
  */
