@@ -9,20 +9,29 @@ extern "C" {
 #include <stddef.h>
 #include <stdint.h>
 
+#include "firefly-ecc.h"
 
-#define FFX_ADDRESS_LENGTH            (20)
-#define FFX_ADDRESS_STRING_LENGTH     (43)
+
+typedef struct FfxAddress {
+    uint8_t data[20];
+} FfxAddress;
+
+typedef struct FfxChecksumAddress {
+    // '0' 'x' [ 40 case-sensitive nibbles ] '\0'
+    char text[43];
+} FfxChecksumAddress;
+
 
 /**
- *  Computes the EIP-155 %%checksumed%% address of %%address%.
- *
- *  The %%address%% must be E_ADDRESS_LENGTH bytes and
- *  %%checksumed%% must be at least E_ADDRESS_STRING_LENGTH
- *  bytes.
+ *  Returns the EIP-155 %%checksumed%% address of %%address%.
  */
-void ffx_eth_checksumAddress(char *checksumOut, const uint8_t *address);
+FfxChecksumAddress ffx_eth_checksumAddress(const FfxAddress *address);
 
-void ffx_eth_computeAddress(uint8_t *addressOut, const uint8_t *pubkey);
+
+/**
+ *  Returns the address bytes for %%pubkey%%.
+ */
+FfxAddress ffx_eth_getAddress(const FfxEcPubkey *pubkey);
 
 
 #ifdef __cplusplus

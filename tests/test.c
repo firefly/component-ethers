@@ -4,7 +4,7 @@
 #include "firefly-address.h"
 #include "firefly-bip32.h"
 #include "firefly-cbor.h"
-#include "firefly-crypto.h"
+#include "firefly-ecc.h"
 #include "firefly-hash.h"
 #include "firefly-tx.h"
 
@@ -47,23 +47,22 @@ static int cmpbuf(const uint8_t *a, const uint8_t *b, size_t length) {
 ///////////////////////////////
 // Testcase Check Functions
 
-int runTestAccounts(const char* name, const uint8_t *privkey,
+int runTestAccounts(const char* name, const uint8_t *_privkey,
   const char* address) {
 
-    uint8_t pubkey[65] = { 0 };
-    if (!ffx_pk_computePubkeySecp256k1(pubkey, privkey)) {
-        dumpBuffer("failed to compute public key:", privkey, 32);
+    FfxEcPrivkey privkey;
+    memcpy(privkey.data, _privkey, sizeof(privkey.data));
+
+    FfxEcPubkey pubkey;
+    if (!ffx_ec_getPubkey(&pubkey, &privkey)) {
+        dumpBuffer("failed to compute public key:", _privkey, 32);
         return 1;
     }
 
-    char checksum[FFX_ADDRESS_STRING_LENGTH] = { 0 };
-    {
-        uint8_t address[FFX_ADDRESS_LENGTH] = { 0 };
-        ffx_eth_computeAddress(address, pubkey);
-        ffx_eth_checksumAddress(checksum, address);
-    }
+    FfxAddress addr = ffx_eth_getAddress(&pubkey);
+    FfxChecksumAddress checksum = ffx_eth_checksumAddress(&addr);
 
-    if (strncmp(address, checksum, 42)) { return 1; }
+    if (strncmp(address, checksum.text, 42)) { return 1; }
 
     return 0;
 }
@@ -187,7 +186,7 @@ int runTestTxs(const char* name, const uint8_t *privkey, FfxCborCursor tx,
   const uint8_t *rlpSigned, size_t rlpSignedLength) {
 
     uint8_t bytes[1024];
-    FfxTx result = ffx_tx_serializeUnsigned(tx, bytes, sizeof(bytes));
+    FfxDataResult result = ffx_tx_serializeUnsigned(tx, bytes, sizeof(bytes));
 
     if (result.error) {
         printf("Failed to serialize unsigned tx: status=%d\n", result.error);
@@ -200,11 +199,11 @@ int runTestTxs(const char* name, const uint8_t *privkey, FfxCborCursor tx,
     //dumpBuffer("ADDR", addr.bytes, addr.length);
 
 
-    if (result.rlp.length != rlpUnsignedLength ||
-      cmpbuf(result.rlp.bytes, rlpUnsigned, rlpUnsignedLength)) {
+    if (result.length != rlpUnsignedLength ||
+      cmpbuf(result.bytes, rlpUnsigned, rlpUnsignedLength)) {
         printf("Unsigned TX RLP did not match\n");
         ffx_cbor_dump(tx);
-        dumpBuffer("Actual:   ", result.rlp.bytes, result.rlp.length);
+        dumpBuffer("Actual:   ", result.bytes, result.length);
         dumpBuffer("Expected: ", rlpUnsigned, rlpUnsignedLength);
         return 1;
     }

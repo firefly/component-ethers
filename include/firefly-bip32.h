@@ -10,6 +10,7 @@ extern "C" {
 #include <stddef.h>
 #include <stdint.h>
 
+#include "firefly-ecc.h"
 
 ///////////////////////////////
 // BIP39 Wordlist - low-level functions
@@ -129,8 +130,12 @@ bool ffx_mnemonic_getSeed(FfxMnemonic *mnemonic, const char* password,
  *  An Hierarchal-Deterministic Node.
  */
 typedef struct FfxHDNode {
-    // Hold either a privkey (key[0] = 0) or a pubkey (key[0] = 4)
-    uint8_t key[65];
+    bool neutered;
+
+    union {
+        FfxEcCompPubkey pubkey;
+        FfxEcPrivkey privkey;
+    } key;
 
     uint8_t chaincode[32];
 
@@ -178,12 +183,6 @@ bool ffx_hdnode_deriveIndexedAccount(FfxHDNode *node, uint32_t account);
 bool ffx_hdnode_neuter(FfxHDNode *node);
 
 /**
- *  Returns true if %%node%% is neutered and therefor only public keys can
- *  be derived.
- */
-bool ffx_hdnode_isNeuter(FfxHDNode *node);
-
-/**
  *  Writes the private key to %%privkeyOut%%, returning false on failure.
  *
  *  The length of %%privkeyOut%% must be [[FFX_PRIVKEY_LENGTH]].
@@ -201,7 +200,6 @@ bool ffx_hdnode_getPubkey(FfxHDNode *node, bool compressed,
   uint8_t *pubkeyOut);
 
 //bool ffx_hdnode_getExtendedKey(FfxHDNode *node, char *extkeyOut);
-
 
 
 

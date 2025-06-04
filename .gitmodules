@@ -1,0 +1,3 @@
+[submodule "third-party/bitcoin-core-secp256k1"]
+	path = third-party/bitcoin-core-secp256k1
+	url = git@github.com:ricmoo/bitcoin-core-secp256k1.git

@@ -4,7 +4,12 @@
 #include "firefly-hash.h"
 
 
-void ffx_eth_checksumAddress(char *checksumOut, const uint8_t *address) {
+FfxChecksumAddress ffx_eth_checksumAddress(const FfxAddress *address) {
+
+    const uint8_t *bytes = address->data;
+
+    FfxChecksumAddress result;
+    char *checksumOut = result.text;
 
     // Add the "0x" prefix and advance the pointer (so we can ignore it)
     checksumOut[0] = '0';
@@ -15,8 +20,8 @@ void ffx_eth_checksumAddress(char *checksumOut, const uint8_t *address) {
     const char * const HexNibbles = "0123456789abcdef";
     int offset = 0;
     for (int i = 0; i < 20; i++) {
-        checksumOut[offset++] = HexNibbles[address[i] >> 4];
-        checksumOut[offset++] = HexNibbles[address[i] & 0xf];
+        checksumOut[offset++] = HexNibbles[bytes[i] >> 4];
+        checksumOut[offset++] = HexNibbles[bytes[i] & 0xf];
     }
 
     // Hash the ASCII representation
@@ -35,11 +40,16 @@ void ffx_eth_checksumAddress(char *checksumOut, const uint8_t *address) {
             checksumOut[i + 1] -= 0x20;
         }
     }
+
+    return result;
 }
 
-void ffx_eth_computeAddress(uint8_t *addressOut, const uint8_t *pubkey) {
+FfxAddress ffx_eth_getAddress(const FfxEcPubkey *pubkey) {
     uint8_t hashed[32];
-    ffx_hash_keccak256(hashed, &pubkey[1], 64);
+    ffx_hash_keccak256(hashed, &pubkey->data[1], 64);
 
-    memcpy(addressOut, &hashed[12], 20);
+    FfxAddress result;
+    memcpy(result.data, &hashed[12], 20);
+
+    return result;
 }
